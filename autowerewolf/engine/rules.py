@@ -286,6 +286,10 @@ def resolve_night_actions(
                 # Double protection kills the target
                 target.is_alive = False
                 dead_player_ids.append(wolf_target_id)
+                # Handle sheriff death
+                if target.is_sheriff:
+                    target.is_sheriff = False
+                    new_state.sheriff_id = None
             elif is_protected or is_saved:
                 # Protected or saved - survives
                 pass
@@ -293,6 +297,10 @@ def resolve_night_actions(
                 # Not protected and not saved - dies
                 target.is_alive = False
                 dead_player_ids.append(wolf_target_id)
+                # Handle sheriff death
+                if target.is_sheriff:
+                    target.is_sheriff = False
+                    new_state.sheriff_id = None
                 
                 # Check if target is hunter - mark cannot shoot if poisoned too
                 if target.role == Role.HUNTER:
@@ -311,6 +319,11 @@ def resolve_night_actions(
             # Hunter cannot shoot if poisoned
             if target.role == Role.HUNTER:
                 target.hunter_can_shoot = False
+            
+            # Handle sheriff death from poison
+            if target.is_sheriff:
+                target.is_sheriff = False
+                new_state.sheriff_id = None
     
     # Update state
     new_state.wolf_kill_target_id = wolf_target_id
@@ -604,9 +617,11 @@ def resolve_hunter_shot(
             ))
             
             # Handle sheriff death from hunter shot
+            # When shot by hunter, the sheriff badge is automatically torn (no passing)
             if target.is_sheriff:
                 target.is_sheriff = False
                 new_state.sheriff_id = None
+                new_state.badge_torn = True
     
     return new_state, events
 

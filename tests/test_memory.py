@@ -272,3 +272,36 @@ class TestCreateFunctions:
     def test_create_werewolf_camp_memory(self):
         memory = create_werewolf_camp_memory()
         assert isinstance(memory, WerewolfCampMemory)
+
+
+class TestMemoryCompression:
+    def test_fact_memory_compression(self):
+        memory = GameFactMemory("p1", max_facts=10)
+        for i in range(15):
+            memory.add_speech_summary(1, f"p{i}", f"Speech {i}")
+        
+        assert len(memory._facts) <= 10
+        assert memory._compressed_summary != ""
+
+    def test_fact_memory_compressed_summary_in_context(self):
+        memory = GameFactMemory("p1", max_facts=10)
+        for i in range(15):
+            memory.add_speech_summary(1, f"p{i}", f"Speech {i}")
+        
+        context = memory.to_context_string()
+        assert "[Historical Summary]" in context or "[Recent Events]" in context
+
+    def test_agent_memory_context_length(self):
+        memory = AgentMemory("p1", max_facts=20)
+        for i in range(30):
+            memory.update_after_speech(1, f"p{i}", f"This is a speech from player {i}")
+        
+        length = memory.get_context_length()
+        assert length > 0
+
+    def test_agent_memory_compression_threshold(self):
+        memory = AgentMemory("p1", memory_type="buffer", max_facts=20, summary_threshold=10)
+        for i in range(15):
+            memory.update_after_speech(1, f"p{i}", f"Speech {i}")
+        
+        assert len(memory.facts._facts) <= 20

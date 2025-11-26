@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,9 +36,9 @@ class PerformanceConfig(BaseModel):
         description="Use compact log format"
     )
     max_speech_length: int = Field(
-        default=500,
+        default=2000,
         ge=50,
-        le=2000,
+        le=5000,
         description="Maximum speech length in characters"
     )
     max_reasoning_length: int = Field(
@@ -46,6 +46,16 @@ class PerformanceConfig(BaseModel):
         ge=0,
         le=500,
         description="Maximum reasoning length in characters"
+    )
+    memory_type: Literal["buffer", "summary"] = Field(
+        default="buffer",
+        description="Memory type: buffer keeps recent history, summary compresses with LLM"
+    )
+    max_memory_facts: int = Field(
+        default=100,
+        ge=20,
+        le=500,
+        description="Maximum number of facts to keep before compression"
     )
 
 

@@ -201,16 +201,23 @@ class BasePlayerAgent(ABC):
             self._vote_chain = self._build_vote_chain()
         return self._vote_chain
 
-    def decide_night_action(self, game_view: GameView) -> NightActionOutput:
+    def _build_context_with_memory(self, game_view: GameView) -> str:
         context = game_view.to_prompt_context()
+        memory_context = self._get_memory_context()
+        if memory_context:
+            context = f"{context}\n\nYour memory:\n{memory_context}"
+        return context
+
+    def decide_night_action(self, game_view: GameView) -> NightActionOutput:
+        context = self._build_context_with_memory(game_view)
         return self.night_chain.invoke({"context": context})
 
     def decide_day_speech(self, game_view: GameView) -> SpeechOutput:
-        context = game_view.to_prompt_context()
+        context = self._build_context_with_memory(game_view)
         return self.speech_chain.invoke({"context": context})
 
     def decide_vote(self, game_view: GameView) -> VoteOutput:
-        context = game_view.to_prompt_context()
+        context = self._build_context_with_memory(game_view)
         return self.vote_chain.invoke({"context": context})
 
     def decide_sheriff_run(self, game_view: GameView) -> SheriffDecisionOutput:
@@ -220,7 +227,7 @@ class BasePlayerAgent(ABC):
             ("human", human_template),
         ])
         chain = prompt | self.chat_model.with_structured_output(SheriffDecisionOutput)
-        context = game_view.to_prompt_context()
+        context = self._build_context_with_memory(game_view)
         result = chain.invoke({"context": context})
         return result  # type: ignore
 
@@ -231,7 +238,7 @@ class BasePlayerAgent(ABC):
             ("human", human_template),
         ])
         chain = prompt | self.chat_model.with_structured_output(BadgeDecisionOutput)
-        context = game_view.to_prompt_context()
+        context = self._build_context_with_memory(game_view)
         result = chain.invoke({"context": context})
         return result  # type: ignore
 
@@ -250,10 +257,7 @@ class BasePlayerAgent(ABC):
         return self._last_words_chain
 
     def decide_last_words(self, game_view: GameView) -> LastWordsOutput:
-        context = game_view.to_prompt_context()
-        memory_context = self._get_memory_context()
-        if memory_context:
-            context = f"{context}\n\nYour memory:\n{memory_context}"
+        context = self._build_context_with_memory(game_view)
         return self.last_words_chain.invoke({"context": context})
 
 

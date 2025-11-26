@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from enum import Enum
+
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
 
 
 class FactType(str, Enum):
@@ -27,12 +30,16 @@ class GameFact:
 
 
 class GameFactMemory:
-    def __init__(self, owner_id: str):
+    def __init__(self, owner_id: str, max_facts: int = 100):
         self.owner_id = owner_id
         self._facts: list[GameFact] = []
+        self._max_facts = max_facts
+        self._compressed_summary: str = ""
 
     def add_fact(self, fact: GameFact) -> None:
         self._facts.append(fact)
+        if len(self._facts) > self._max_facts:
+            self._compress_old_facts()
 
     def add_role_claim(
         self,
@@ -139,20 +146,51 @@ class GameFactMemory:
         return self._facts[-limit:]
 
     def to_context_string(self, include_private: bool = True) -> str:
+        parts = []
+        if self._compressed_summary:
+            parts.append(f"[Historical Summary]\n{self._compressed_summary}")
+        
         facts = self._facts if include_private else [f for f in self._facts if not f.is_private]
-        if not facts:
-            return "No recorded facts."
-        lines = []
-        for fact in facts:
-            lines.append(f"[Day {fact.day_number}] {fact.content}")
-        return "\n".join(lines)
+        if facts:
+            lines = [f"[Day {fact.day_number}] {fact.content}" for fact in facts]
+            parts.append("[Recent Events]\n" + "\n".join(lines))
+        
+        return "\n\n".join(parts) if parts else "No recorded facts."
 
     def get_voting_patterns(self, player_id: str) -> list[tuple[int, str]]:
         votes = self.get_facts(fact_type=FactType.VOTE_CAST, player_id=player_id)
         return [(v.day_number, v.metadata.get("target_id", "unknown")) for v in votes]
 
+    def _compress_old_facts(self) -> None:
+        keep_count = self._max_facts // 2
+        old_facts = self._facts[:-keep_count]
+        self._facts = self._facts[-keep_count:]
+        
+        summary_parts = []
+        by_day: dict[int, list[str]] = {}
+        for fact in old_facts:
+            if fact.day_number not in by_day:
+                by_day[fact.day_number] = []
+            by_day[fact.day_number].append(fact.content)
+        
+        for day_num in sorted(by_day.keys()):
+            day_facts = by_day[day_num]
+            if len(day_facts) > 3:
+                summary_parts.append(f"Day {day_num}: {len(day_facts)} events recorded")
+            else:
+                summary_parts.extend([f"[Day {day_num}] {f}" for f in day_facts])
+        
+        if self._compressed_summary:
+            self._compressed_summary = f"{self._compressed_summary}\n{chr(10).join(summary_parts)}"
+        else:
+            self._compressed_summary = "\n".join(summary_parts)
+
+    def get_compressed_summary(self) -> str:
+        return self._compressed_summary
+
     def clear(self) -> None:
         self._facts = []
+        self._compressed_summary = ""
 
 
 class WerewolfCampMemory:
@@ -249,12 +287,19 @@ class AgentMemory:
         self,
         owner_id: str,
         memory_type: Literal["buffer", "summary"] = "buffer",
+        max_facts: int = 100,
+        summary_threshold: int = 50,
     ):
         self.owner_id = owner_id
         self.memory_type = memory_type
-        self.facts = GameFactMemory(owner_id)
+        self.facts = GameFactMemory(owner_id, max_facts=max_facts)
         self.conversation = ConversationMemory()
         self._summary: str = ""
+        self._summary_threshold = summary_threshold
+        self._summarizer: Optional["BaseChatModel"] = None
+
+    def set_summarizer(self, chat_model: "BaseChatModel") -> None:
+        self._summarizer = chat_model
 
     def update_after_speech(
         self,
@@ -264,6 +309,7 @@ class AgentMemory:
     ) -> None:
         summary = speech_content[:200] + "..." if len(speech_content) > 200 else speech_content
         self.facts.add_speech_summary(day_number, player_id, summary)
+        self._maybe_compress()
 
     def update_after_vote(
         self,
@@ -286,6 +332,30 @@ class AgentMemory:
                     event.get("player_id", ""),
                     event.get("death_type", "unknown"),
                 )
+        self._maybe_compress()
+
+    def _maybe_compress(self) -> None:
+        if self.memory_type == "summary" and len(self.facts._facts) > self._summary_threshold:
+            self._generate_summary()
+
+    def _generate_summary(self) -> None:
+        if not self._summarizer:
+            return
+        
+        current_context = self.facts.to_context_string()
+        if len(current_context) < 500:
+            return
+        
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+            messages = [
+                SystemMessage(content="Summarize the following game events concisely. Focus on key information: deaths, suspicious behaviors, role claims, and voting patterns. Keep it under 300 words."),
+                HumanMessage(content=current_context),
+            ]
+            result = self._summarizer.invoke(messages)
+            self._summary = str(result.content)
+        except Exception:
+            pass
 
     def update_summary(self, new_summary: str) -> None:
         self._summary = new_summary
@@ -295,15 +365,26 @@ class AgentMemory:
 
     def to_context_string(self) -> str:
         parts = []
+        
+        compressed = self.facts.get_compressed_summary()
+        if compressed:
+            parts.append(f"Historical Summary:\n{compressed}")
+        
         if self._summary and self.memory_type == "summary":
             parts.append(f"Game Summary:\n{self._summary}")
+        
         fact_context = self.facts.to_context_string()
         if fact_context != "No recorded facts.":
             parts.append(f"Known Facts:\n{fact_context}")
+        
         conv_context = self.conversation.to_context_string()
         if conv_context:
             parts.append(f"Recent Context:\n{conv_context}")
+        
         return "\n\n".join(parts) if parts else ""
+
+    def get_context_length(self) -> int:
+        return len(self.to_context_string())
 
 
 def create_agent_memory(
