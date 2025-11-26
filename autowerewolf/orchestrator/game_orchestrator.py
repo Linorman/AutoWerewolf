@@ -1,0 +1,1054 @@
+import logging
+import random
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, NotRequired, Optional, TypedDict, cast
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.graph import END, StateGraph
+
+from autowerewolf.agents.backend import get_chat_model
+from autowerewolf.agents.batch import BatchExecutor, create_batch_executor
+from autowerewolf.agents.moderator import ModeratorChain
+from autowerewolf.agents.player_base import (
+    BasePlayerAgent,
+    GameView,
+    create_player_agent,
+)
+from autowerewolf.agents.schemas import (
+    BadgeDecisionOutput,
+    GuardNightOutput,
+    HunterShootOutput,
+    SeerNightOutput,
+    SpeechOutput,
+    VoteOutput,
+    WerewolfNightOutput,
+    WitchNightOutput,
+)
+from autowerewolf.config.models import AgentModelConfig
+from autowerewolf.config.performance import (
+    PERFORMANCE_PRESETS,
+    PerformanceConfig,
+    VerbosityLevel,
+)
+from autowerewolf.engine.roles import Alignment, Phase, Role, WinningTeam
+from autowerewolf.engine.rules import (
+    advance_to_day,
+    advance_to_night,
+    check_win_condition,
+    create_game_state,
+    get_valid_guard_targets,
+    get_valid_hunter_targets,
+    get_valid_vote_targets,
+    get_valid_wolf_targets,
+    resolve_badge_action,
+    resolve_hunter_shot,
+    resolve_lynch,
+    resolve_night_actions,
+    resolve_sheriff_election,
+    resolve_vote,
+    resolve_wolf_self_explode,
+    update_win_condition,
+)
+from autowerewolf.engine.state import (
+    Action,
+    ActionType,
+    DeathAnnouncementEvent,
+    Event,
+    GameConfig,
+    GameState,
+    GuardProtectAction,
+    HunterShootAction,
+    PassBadgeAction,
+    SeerCheckAction,
+    SpeechAction,
+    SpeechEvent,
+    TearBadgeAction,
+    VoteAction,
+    WitchCureAction,
+    WitchPoisonAction,
+    WolfKillAction,
+)
+from autowerewolf.io.logging import GameLogLevel, GameLogger, create_game_logger
+from autowerewolf.io.persistence import (
+    GameLog,
+    PlayerLog,
+    create_game_log,
+    save_game_log,
+)
+
+logger = logging.getLogger(__name__)
+
+MAX_GAME_DAYS = 20
+
+
+@dataclass
+class GameResult:
+    winning_team: WinningTeam
+    final_state: GameState
+    events: list[Event] = field(default_factory=list)
+    narration_log: list[str] = field(default_factory=list)
+    game_log: Optional[GameLog] = None
+
+
+class GraphState(TypedDict):
+    """TypedDict for StateGraph state."""
+    game_state: GameState
+    agents: dict[str, BasePlayerAgent]
+    moderator: ModeratorChain
+    events_buffer: NotRequired[list[Event]]
+    narration_log: NotRequired[list[str]]
+    night_deaths: NotRequired[list[str]]
+    pending_hunter_shot: NotRequired[Optional[str]]
+    pending_badge_decision: NotRequired[Optional[str]]
+
+
+@dataclass
+class OrchestratorState:
+    game_state: GameState
+    agents: dict[str, BasePlayerAgent]
+    moderator: ModeratorChain
+    events_buffer: list[Event] = field(default_factory=list)
+    narration_log: list[str] = field(default_factory=list)
+    night_deaths: list[str] = field(default_factory=list)
+    pending_hunter_shot: Optional[str] = None
+    pending_badge_decision: Optional[str] = None
+
+
+class GameOrchestrator:
+    def __init__(
+        self,
+        config: GameConfig,
+        agent_models: AgentModelConfig,
+        player_names: Optional[list[str]] = None,
+        log_level: GameLogLevel = GameLogLevel.STANDARD,
+        output_path: Optional[Path] = None,
+        enable_console_logging: bool = True,
+        enable_file_logging: bool = False,
+        performance_config: Optional[PerformanceConfig] = None,
+    ):
+        self.config = config
+        self.agent_models = agent_models
+        self.player_names = player_names
+        self.performance_config = performance_config or PERFORMANCE_PRESETS["standard"]
+        self._game_state: Optional[GameState] = None
+        self._agents: dict[str, BasePlayerAgent] = {}
+        self._moderator: Optional[ModeratorChain] = None
+        self._graph: Optional[StateGraph] = None
+        self._batch_executor: Optional[BatchExecutor] = None
+        
+        self._game_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
+        self._log_level = log_level
+        self._output_path = output_path
+        self._enable_console_logging = enable_console_logging
+        self._enable_file_logging = enable_file_logging
+        self._game_logger: Optional[GameLogger] = None
+        self._game_log: Optional[GameLog] = None
+
+    def _initialize_game(self) -> GameState:
+        return create_game_state(self.config, self.player_names)
+
+    def _get_model_for_role(self, role: Role) -> BaseChatModel:
+        role_name = role.value
+        config = self.agent_models.get_config_for_role(role_name)
+        return get_chat_model(config)
+
+    def _create_agents(self, game_state: GameState) -> dict[str, BasePlayerAgent]:
+        agents = {}
+        verbosity = self.performance_config.verbosity
+        for player in game_state.players:
+            chat_model = self._get_model_for_role(player.role)
+            agent = create_player_agent(
+                player_id=player.id,
+                player_name=player.name,
+                role=player.role,
+                chat_model=chat_model,
+                verbosity=verbosity,
+            )
+            agents[player.id] = agent
+        return agents
+
+    def _create_batch_executor(self) -> BatchExecutor:
+        rate_limit = self.agent_models.default.rate_limit_rpm
+        return create_batch_executor(self.performance_config, rate_limit)
+
+    def _create_moderator(self) -> ModeratorChain:
+        config = self.agent_models.get_config_for_role("moderator")
+        chat_model = get_chat_model(config)
+        return ModeratorChain(chat_model)
+
+    def build_game_view(
+        self,
+        game_state: GameState,
+        player_id: str,
+        action_context: Optional[dict[str, Any]] = None,
+    ) -> GameView:
+        player = game_state.get_player(player_id)
+        if not player:
+            raise ValueError(f"Player {player_id} not found")
+
+        alive_players = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "seat_number": p.seat_number,
+                "is_sheriff": p.is_sheriff,
+                "is_alive": p.is_alive,
+            }
+            for p in game_state.players
+        ]
+
+        public_events = game_state.get_public_events()
+        public_history = [
+            {"description": self._describe_event_for_view(e, game_state)}
+            for e in public_events[-20:]
+        ]
+
+        private_info = self._get_private_info(game_state, player)
+
+        return GameView(
+            player_id=player_id,
+            player_name=player.name,
+            role=player.role,
+            phase=game_state.phase.value,
+            day_number=game_state.day_number,
+            alive_players=alive_players,
+            public_history=public_history,
+            private_info=private_info,
+            action_context=action_context or {},
+        )
+
+    def _describe_event_for_view(self, event: Event, game_state: GameState) -> str:
+        target = game_state.get_player(event.target_id) if event.target_id else None
+        actor = game_state.get_player(event.actor_id) if event.actor_id else None
+
+        event_type = event.event_type.value
+        target_name = target.name if target else "Unknown"
+        actor_name = actor.name if actor else "Unknown"
+
+        descriptions = {
+            "death_announcement": f"{target_name} was found dead",
+            "lynch": f"{target_name} was lynched",
+            "speech": f"{actor_name}: {event.data.get('content', '')[:100]}",
+            "vote_cast": f"{actor_name} voted for {target_name}",
+            "sheriff_elected": f"{target_name} became sheriff",
+            "hunter_shot": f"{actor_name} shot {target_name}",
+            "village_idiot_reveal": f"{target_name} revealed as Village Idiot",
+            "badge_pass": f"Badge passed to {target_name}",
+            "badge_tear": "Badge was torn",
+            "wolf_self_explode": f"{actor_name} self-exploded as werewolf",
+        }
+        return descriptions.get(event_type, event_type)
+
+    def _get_private_info(
+        self, game_state: GameState, player: Any
+    ) -> dict[str, Any]:
+        private_info: dict[str, Any] = {}
+
+        if player.role == Role.WEREWOLF:
+            wolves = game_state.get_werewolves()
+            private_info["teammates"] = [
+                {"id": w.id, "name": w.name, "is_alive": w.is_alive}
+                for w in wolves
+                if w.id != player.id
+            ]
+
+        elif player.role == Role.SEER:
+            private_info["check_results"] = [
+                {"player_id": pid, "result": alignment.value}
+                for pid, alignment in player.seer_checks
+            ]
+
+        elif player.role == Role.WITCH:
+            private_info["has_cure"] = player.witch_has_cure
+            private_info["has_poison"] = player.witch_has_poison
+            if game_state.wolf_kill_target_id:
+                target = game_state.get_player(game_state.wolf_kill_target_id)
+                if target:
+                    private_info["attack_target"] = {
+                        "id": target.id,
+                        "name": target.name,
+                    }
+
+        elif player.role == Role.GUARD:
+            private_info["last_protected"] = player.guard_last_protected
+
+        elif player.role == Role.HUNTER:
+            private_info["can_shoot"] = player.hunter_can_shoot
+
+        elif player.role == Role.VILLAGE_IDIOT:
+            private_info["revealed"] = player.village_idiot_revealed
+
+        return private_info
+
+    def _collect_werewolf_action(
+        self,
+        state: OrchestratorState,
+    ) -> Optional[WolfKillAction]:
+        wolves = state.game_state.get_alive_werewolves()
+        if not wolves:
+            return None
+
+        valid_targets = get_valid_wolf_targets(
+            state.game_state,
+            include_self_knife=state.game_state.config.rule_variants.allow_wolf_self_knife,
+        )
+
+        lead_wolf = wolves[0]
+        action_context = {
+            "valid_targets": valid_targets,
+            "teammates": [w.id for w in wolves if w.id != lead_wolf.id],
+        }
+
+        agent = state.agents.get(lead_wolf.id)
+        if not agent:
+            return None
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state, lead_wolf.id, action_context
+            )
+            result = agent.decide_night_action(game_view)
+
+            if isinstance(result, WerewolfNightOutput):
+                if result.self_explode:
+                    return None
+                if result.kill_target_id in valid_targets:
+                    return WolfKillAction(
+                        actor_id=lead_wolf.id,
+                        target_id=result.kill_target_id,
+                    )
+        except Exception as e:
+            logger.warning(f"Werewolf action failed: {e}")
+
+        if valid_targets:
+            target = random.choice(valid_targets)
+            return WolfKillAction(actor_id=lead_wolf.id, target_id=target)
+        return None
+
+    def _collect_seer_action(
+        self,
+        state: OrchestratorState,
+    ) -> Optional[SeerCheckAction]:
+        seers = state.game_state.get_alive_players_by_role(Role.SEER)
+        if not seers:
+            return None
+
+        seer = seers[0]
+        valid_targets = [
+            p.id for p in state.game_state.get_alive_players() if p.id != seer.id
+        ]
+
+        agent = state.agents.get(seer.id)
+        if not agent:
+            return None
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state, seer.id, {"valid_targets": valid_targets}
+            )
+            result = agent.decide_night_action(game_view)
+
+            if isinstance(result, SeerNightOutput):
+                if result.check_target_id in valid_targets:
+                    return SeerCheckAction(
+                        actor_id=seer.id,
+                        target_id=result.check_target_id,
+                    )
+        except Exception as e:
+            logger.warning(f"Seer action failed: {e}")
+
+        if valid_targets:
+            target = random.choice(valid_targets)
+            return SeerCheckAction(actor_id=seer.id, target_id=target)
+        return None
+
+    def _collect_witch_action(
+        self,
+        state: OrchestratorState,
+    ) -> tuple[Optional[WitchCureAction], Optional[WitchPoisonAction]]:
+        witches = state.game_state.get_alive_players_by_role(Role.WITCH)
+        if not witches:
+            return None, None
+
+        witch = witches[0]
+        agent = state.agents.get(witch.id)
+        if not agent:
+            return None, None
+
+        action_context = {
+            "has_cure": witch.witch_has_cure,
+            "has_poison": witch.witch_has_poison,
+            "attack_target": state.game_state.wolf_kill_target_id,
+        }
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state, witch.id, action_context
+            )
+            result = agent.decide_night_action(game_view)
+
+            cure_action = None
+            poison_action = None
+
+            if isinstance(result, WitchNightOutput):
+                if result.use_cure and witch.witch_has_cure:
+                    cure_action = WitchCureAction(
+                        actor_id=witch.id,
+                        target_id=state.game_state.wolf_kill_target_id,
+                    )
+                if result.use_poison and witch.witch_has_poison and result.poison_target_id:
+                    poison_action = WitchPoisonAction(
+                        actor_id=witch.id,
+                        target_id=result.poison_target_id,
+                    )
+
+            return cure_action, poison_action
+        except Exception as e:
+            logger.warning(f"Witch action failed: {e}")
+            return None, None
+
+    def _collect_guard_action(
+        self,
+        state: OrchestratorState,
+    ) -> Optional[GuardProtectAction]:
+        guards = state.game_state.get_alive_players_by_role(Role.GUARD)
+        if not guards:
+            return None
+
+        guard = guards[0]
+        valid_targets = get_valid_guard_targets(state.game_state, guard.id)
+
+        agent = state.agents.get(guard.id)
+        if not agent:
+            return None
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state, guard.id, {"valid_targets": valid_targets}
+            )
+            result = agent.decide_night_action(game_view)
+
+            if isinstance(result, GuardNightOutput):
+                if result.protect_target_id in valid_targets:
+                    return GuardProtectAction(
+                        actor_id=guard.id,
+                        target_id=result.protect_target_id,
+                    )
+        except Exception as e:
+            logger.warning(f"Guard action failed: {e}")
+
+        if valid_targets:
+            target = random.choice(valid_targets)
+            return GuardProtectAction(actor_id=guard.id, target_id=target)
+        return None
+
+    def _run_night_phase(self, state: OrchestratorState) -> OrchestratorState:
+        narration = state.moderator.announce_night_start(state.game_state)
+        state.narration_log.append(narration)
+
+        actions: list[Action] = []
+
+        guard_action = self._collect_guard_action(state)
+        if guard_action:
+            actions.append(guard_action)
+
+        wolf_action = self._collect_werewolf_action(state)
+        if wolf_action:
+            actions.append(wolf_action)
+            new_state = deepcopy(state.game_state)
+            new_state.wolf_kill_target_id = wolf_action.target_id
+            state.game_state = new_state
+
+        cure_action, poison_action = self._collect_witch_action(state)
+        if cure_action:
+            actions.append(cure_action)
+        if poison_action:
+            actions.append(poison_action)
+
+        seer_action = self._collect_seer_action(state)
+        if seer_action:
+            actions.append(seer_action)
+
+        new_game_state, events = resolve_night_actions(state.game_state, actions)
+        state.game_state = new_game_state
+        state.events_buffer.extend(events)
+
+        state.night_deaths = []
+        for player in state.game_state.players:
+            if not player.is_alive:
+                prev_player = None
+                for p in state.game_state.players:
+                    if p.id == player.id:
+                        prev_player = p
+                        break
+                if prev_player:
+                    state.night_deaths.append(player.id)
+
+        return state
+
+    def _run_sheriff_election(self, state: OrchestratorState) -> OrchestratorState:
+        if state.game_state.sheriff_election_complete:
+            return state
+
+        narration = state.moderator.announce_sheriff_election()
+        state.narration_log.append(narration)
+
+        candidates = []
+        for player in state.game_state.get_alive_players():
+            agent = state.agents.get(player.id)
+            if not agent:
+                continue
+
+            try:
+                game_view = self.build_game_view(state.game_state, player.id)
+                result = agent.decide_sheriff_run(game_view)
+                if result.run_for_sheriff:
+                    candidates.append(player.id)
+            except Exception as e:
+                logger.warning(f"Sheriff decision failed for {player.id}: {e}")
+
+        if not candidates:
+            state.game_state.sheriff_election_complete = True
+            return state
+
+        votes: dict[str, str] = {}
+        for player in state.game_state.get_alive_players():
+            if player.id in candidates:
+                continue
+
+            agent = state.agents.get(player.id)
+            if not agent:
+                continue
+
+            try:
+                game_view = self.build_game_view(
+                    state.game_state,
+                    player.id,
+                    {"candidates": candidates},
+                )
+                result = agent.decide_vote(game_view)
+                if result.target_player_id in candidates:
+                    votes[player.id] = result.target_player_id
+            except Exception as e:
+                logger.warning(f"Sheriff vote failed for {player.id}: {e}")
+
+        new_game_state, events = resolve_sheriff_election(
+            state.game_state, candidates, votes
+        )
+        state.game_state = new_game_state
+        state.events_buffer.extend(events)
+
+        return state
+
+    def _run_day_speeches(self, state: OrchestratorState) -> OrchestratorState:
+        alive_players = state.game_state.get_alive_players()
+
+        sheriff = state.game_state.get_sheriff()
+        if sheriff:
+            ordered = [sheriff] + [p for p in alive_players if p.id != sheriff.id]
+        else:
+            ordered = alive_players
+
+        if self.performance_config.enable_batching and self._batch_executor:
+            requests = []
+            for player in ordered:
+                agent = state.agents.get(player.id)
+                if agent:
+                    game_view = self.build_game_view(state.game_state, player.id)
+                    requests.append((agent, game_view))
+
+            results = self._batch_executor.execute_speeches_batch(requests)
+            for batch_result in results:
+                if batch_result.result and isinstance(batch_result.result, SpeechOutput):
+                    content = batch_result.result.content
+                    if len(content) > self.performance_config.max_speech_length:
+                        content = content[:self.performance_config.max_speech_length] + "..."
+                    event = SpeechEvent(
+                        day_number=state.game_state.day_number,
+                        phase=Phase.DAY,
+                        actor_id=batch_result.player_id,
+                        data={"content": content},
+                    )
+                    state.game_state.add_event(event)
+                    state.events_buffer.append(event)
+        else:
+            for player in ordered:
+                agent = state.agents.get(player.id)
+                if not agent:
+                    continue
+
+                try:
+                    game_view = self.build_game_view(state.game_state, player.id)
+                    result = agent.decide_day_speech(game_view)
+
+                    if isinstance(result, SpeechOutput):
+                        content = result.content
+                        if len(content) > self.performance_config.max_speech_length:
+                            content = content[:self.performance_config.max_speech_length] + "..."
+                        event = SpeechEvent(
+                            day_number=state.game_state.day_number,
+                            phase=Phase.DAY,
+                            actor_id=player.id,
+                            data={"content": content},
+                        )
+                        state.game_state.add_event(event)
+                        state.events_buffer.append(event)
+                except Exception as e:
+                    logger.warning(f"Speech failed for {player.id}: {e}")
+
+        return state
+
+    def _run_day_vote(self, state: OrchestratorState) -> OrchestratorState:
+        if not self.performance_config.skip_narration:
+            narration = state.moderator.announce_voting_start()
+            state.narration_log.append(narration)
+
+        votes: dict[str, str] = {}
+
+        if self.performance_config.enable_batching and self._batch_executor:
+            requests = []
+            player_targets: dict[str, list[str]] = {}
+            for player in state.game_state.get_alive_players():
+                agent = state.agents.get(player.id)
+                if agent:
+                    valid_targets = get_valid_vote_targets(state.game_state, player.id)
+                    player_targets[player.id] = valid_targets
+                    game_view = self.build_game_view(
+                        state.game_state,
+                        player.id,
+                        {"valid_targets": valid_targets},
+                    )
+                    requests.append((agent, game_view))
+
+            results = self._batch_executor.execute_votes_batch(requests)
+            for batch_result in results:
+                valid_targets = player_targets.get(batch_result.player_id, [])
+                if batch_result.result and isinstance(batch_result.result, VoteOutput):
+                    if batch_result.result.target_player_id in valid_targets:
+                        votes[batch_result.player_id] = batch_result.result.target_player_id
+                    elif valid_targets:
+                        votes[batch_result.player_id] = random.choice(valid_targets)
+                elif valid_targets:
+                    votes[batch_result.player_id] = random.choice(valid_targets)
+        else:
+            for player in state.game_state.get_alive_players():
+                agent = state.agents.get(player.id)
+                if not agent:
+                    continue
+
+                valid_targets = get_valid_vote_targets(state.game_state, player.id)
+
+                try:
+                    game_view = self.build_game_view(
+                        state.game_state,
+                        player.id,
+                        {"valid_targets": valid_targets},
+                    )
+                    result = agent.decide_vote(game_view)
+
+                    if isinstance(result, VoteOutput):
+                        if result.target_player_id in valid_targets:
+                            votes[player.id] = result.target_player_id
+                        elif valid_targets:
+                            votes[player.id] = random.choice(valid_targets)
+                except Exception as e:
+                    logger.warning(f"Vote failed for {player.id}: {e}")
+                    if valid_targets:
+                        votes[player.id] = random.choice(valid_targets)
+
+        new_game_state, vote_result = resolve_vote(state.game_state, votes)
+        state.game_state = new_game_state
+        state.events_buffer.extend(vote_result.events)
+
+        if vote_result.lynched_player_id:
+            state = self._handle_lynch(state, vote_result.lynched_player_id)
+
+        return state
+
+    def _handle_lynch(
+        self, state: OrchestratorState, lynched_player_id: str
+    ) -> OrchestratorState:
+        lynched = state.game_state.get_player(lynched_player_id)
+        was_sheriff = lynched.is_sheriff if lynched else False
+
+        new_game_state, events = resolve_lynch(state.game_state, lynched_player_id)
+        state.game_state = new_game_state
+        state.events_buffer.extend(events)
+
+        lynched = state.game_state.get_player(lynched_player_id)
+
+        if lynched and lynched.role == Role.VILLAGE_IDIOT and lynched.village_idiot_revealed:
+            return state
+
+        if lynched and not lynched.is_alive:
+            if lynched.role == Role.HUNTER and lynched.hunter_can_shoot:
+                state = self._handle_hunter_shot(state, lynched.id)
+
+            if was_sheriff:
+                state = self._handle_badge_decision(state, lynched.id)
+
+        return state
+
+    def _handle_hunter_shot(
+        self, state: OrchestratorState, hunter_id: str
+    ) -> OrchestratorState:
+        hunter = state.game_state.get_player(hunter_id)
+        if not hunter or not hunter.hunter_can_shoot:
+            return state
+
+        agent = state.agents.get(hunter_id)
+        if not agent:
+            return state
+
+        valid_targets = get_valid_hunter_targets(state.game_state, hunter_id)
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state,
+                hunter_id,
+                {"valid_targets": valid_targets, "dying": True},
+            )
+
+            from autowerewolf.agents.schemas import HunterShootOutput
+
+            result = None
+            try:
+                raw_result = agent.decide_night_action(game_view)
+                if isinstance(raw_result, HunterShootOutput):
+                    result = raw_result
+            except Exception:
+                pass
+
+            target_id = None
+            if isinstance(result, HunterShootOutput) and result.shoot:
+                target_id = result.target_player_id
+
+            if target_id and target_id in valid_targets:
+                action = HunterShootAction(actor_id=hunter_id, target_id=target_id)
+                new_game_state, events = resolve_hunter_shot(state.game_state, action)
+                state.game_state = new_game_state
+                state.events_buffer.extend(events)
+
+        except Exception as e:
+            logger.warning(f"Hunter shot failed: {e}")
+
+        return state
+
+    def _handle_badge_decision(
+        self, state: OrchestratorState, sheriff_id: str
+    ) -> OrchestratorState:
+        agent = state.agents.get(sheriff_id)
+        if not agent:
+            return state
+
+        alive_players = [
+            p.id for p in state.game_state.get_alive_players() if p.id != sheriff_id
+        ]
+
+        try:
+            game_view = self.build_game_view(
+                state.game_state,
+                sheriff_id,
+                {"valid_targets": alive_players, "dying_as_sheriff": True},
+            )
+            result = agent.decide_badge_pass(game_view)
+
+            if isinstance(result, BadgeDecisionOutput):
+                if result.action == "pass" and result.target_player_id in alive_players:
+                    action = PassBadgeAction(
+                        actor_id=sheriff_id,
+                        target_id=result.target_player_id,
+                    )
+                else:
+                    action = TearBadgeAction(actor_id=sheriff_id)
+
+                new_game_state, events = resolve_badge_action(state.game_state, action)
+                state.game_state = new_game_state
+                state.events_buffer.extend(events)
+
+        except Exception as e:
+            logger.warning(f"Badge decision failed: {e}")
+
+        return state
+
+    def _run_day_phase(self, state: OrchestratorState) -> OrchestratorState:
+        state.game_state = advance_to_day(state.game_state)
+
+        if state.game_state.day_number >= MAX_GAME_DAYS:
+            state.game_state.winning_team = WinningTeam.WEREWOLF
+            state.game_state.phase = Phase.GAME_OVER
+            return state
+
+        deaths = state.night_deaths
+        narration = state.moderator.announce_day_start(state.game_state, deaths)
+        state.narration_log.append(narration)
+
+        for death_id in deaths:
+            event = DeathAnnouncementEvent(
+                day_number=state.game_state.day_number,
+                phase=Phase.DAY,
+                target_id=death_id,
+            )
+            state.game_state.add_event(event)
+            state.events_buffer.append(event)
+
+            player = state.game_state.get_player(death_id)
+            if player and player.role == Role.HUNTER and player.hunter_can_shoot:
+                state = self._handle_hunter_shot(state, death_id)
+
+        if state.game_state.day_number == 1:
+            state = self._run_sheriff_election(state)
+
+        state.game_state = update_win_condition(state.game_state)
+        if state.game_state.is_game_over():
+            return state
+
+        state = self._run_day_speeches(state)
+        state = self._run_day_vote(state)
+
+        state.game_state = update_win_condition(state.game_state)
+
+        return state
+
+    def _check_game_end(self, state: OrchestratorState) -> bool:
+        return state.game_state.is_game_over()
+
+    def _build_graph(self) -> StateGraph:
+        def orchestrator_state_to_dict(state: OrchestratorState) -> dict:
+            return {
+                "game_state": state.game_state,
+                "agents": state.agents,
+                "moderator": state.moderator,
+                "events_buffer": state.events_buffer,
+                "narration_log": state.narration_log,
+                "night_deaths": state.night_deaths,
+                "pending_hunter_shot": state.pending_hunter_shot,
+                "pending_badge_decision": state.pending_badge_decision,
+            }
+
+        def dict_to_orchestrator_state(d: GraphState) -> OrchestratorState:
+            return OrchestratorState(
+                game_state=d["game_state"],
+                agents=d["agents"],
+                moderator=d["moderator"],
+                events_buffer=d.get("events_buffer", []),
+                narration_log=d.get("narration_log", []),
+                night_deaths=d.get("night_deaths", []),
+                pending_hunter_shot=d.get("pending_hunter_shot"),
+                pending_badge_decision=d.get("pending_badge_decision"),
+            )
+
+        graph = StateGraph(GraphState)
+
+        def night_node(state: GraphState) -> GraphState:
+            orch_state = dict_to_orchestrator_state(state)
+            orch_state = self._run_night_phase(orch_state)
+            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+
+        def day_node(state: GraphState) -> GraphState:
+            orch_state = dict_to_orchestrator_state(state)
+            orch_state = self._run_day_phase(orch_state)
+            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+
+        def transition_to_night_node(state: GraphState) -> GraphState:
+            orch_state = dict_to_orchestrator_state(state)
+            orch_state.game_state = advance_to_night(orch_state.game_state)
+            orch_state.night_deaths = []
+            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+
+        def check_win_node(state: GraphState) -> GraphState:
+            orch_state = dict_to_orchestrator_state(state)
+            orch_state.game_state = update_win_condition(orch_state.game_state)
+            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+
+        graph.add_node("night", night_node)
+        graph.add_node("day", day_node)
+        graph.add_node("transition_to_night", transition_to_night_node)
+        graph.add_node("check_win", check_win_node)
+
+        def route_after_night(state: GraphState) -> str:
+            return "day"
+
+        def route_after_day(state: GraphState) -> str:
+            orch_state = dict_to_orchestrator_state(state)
+            if orch_state.game_state.is_game_over():
+                return END
+            return "transition_to_night"
+
+        def route_after_transition(state: GraphState) -> str:
+            return "check_win"
+
+        def route_after_check_win(state: GraphState) -> str:
+            orch_state = dict_to_orchestrator_state(state)
+            if orch_state.game_state.is_game_over():
+                return END
+            return "night"
+
+        graph.add_conditional_edges("night", route_after_night)
+        graph.add_conditional_edges("day", route_after_day)
+        graph.add_conditional_edges("transition_to_night", route_after_transition)
+        graph.add_conditional_edges("check_win", route_after_check_win)
+
+        graph.set_entry_point("night")
+
+        return graph
+
+    def _init_logging(self, game_state: GameState) -> None:
+        self._game_logger = create_game_logger(
+            game_id=self._game_id,
+            log_level=self._log_level,
+            output_path=self._output_path,
+            enable_console=self._enable_console_logging,
+            enable_file=self._enable_file_logging,
+        )
+        
+        self._game_log = create_game_log(
+            game_id=self._game_id,
+            config=self.config.model_dump(),
+            role_set=self.config.role_set,
+            random_seed=self.config.random_seed,
+            model_config_info={
+                "backend": self.agent_models.default.backend.value,
+                "model_name": self.agent_models.default.model_name,
+            },
+        )
+        
+        for player in game_state.players:
+            self._game_log.players.append(
+                PlayerLog(
+                    id=player.id,
+                    name=player.name,
+                    seat_number=player.seat_number,
+                    role=player.role.value,
+                    alignment=player.alignment.value,
+                    is_alive=player.is_alive,
+                    is_sheriff=player.is_sheriff,
+                )
+            )
+        
+        players_info = [
+            {"id": p.id, "name": p.name, "seat": p.seat_number, "role": p.role.value}
+            for p in game_state.players
+        ]
+        self._game_logger.log_game_start(self.config, players_info)
+
+    def _log_event(self, event: Event, game_state: GameState) -> None:
+        if not self._game_logger or not self._game_log:
+            return
+        
+        self._game_logger.log_event(event, game_state)
+        self._game_log.add_event(
+            event_type=event.event_type.value,
+            day_number=event.day_number,
+            phase=event.phase.value,
+            actor_id=event.actor_id,
+            target_id=event.target_id,
+            data=event.data,
+            public=event.public,
+        )
+
+    def _finalize_game_log(self, final_state: GameState, narration_log: list[str]) -> None:
+        if not self._game_log:
+            return
+        
+        self._game_log.set_result(
+            winning_team=final_state.winning_team,
+            final_day=final_state.day_number,
+        )
+        self._game_log.narration_log = narration_log
+        
+        for player in final_state.players:
+            for p_log in self._game_log.players:
+                if p_log.id == player.id:
+                    p_log.is_alive = player.is_alive
+                    p_log.is_sheriff = player.is_sheriff
+                    break
+        
+        if self._game_logger:
+            survivors = [
+                {"name": p.name, "role": p.role.value}
+                for p in final_state.players if p.is_alive
+            ]
+            self._game_logger.log_game_end(
+                winning_team=final_state.winning_team.value,
+                final_day=final_state.day_number,
+                survivors=survivors,
+            )
+
+    def save_game_log(self, path: Path) -> None:
+        if self._game_log:
+            save_game_log(self._game_log, path)
+
+    def run_game(self) -> GameResult:
+        self._game_state = self._initialize_game()
+        self._agents = self._create_agents(self._game_state)
+        self._moderator = self._create_moderator()
+        
+        if self.performance_config.enable_batching:
+            self._batch_executor = self._create_batch_executor()
+        
+        self._init_logging(self._game_state)
+
+        initial_state = OrchestratorState(
+            game_state=self._game_state,
+            agents=self._agents,
+            moderator=self._moderator,
+        )
+
+        graph = self._build_graph()
+        compiled_graph = graph.compile()
+
+        initial_dict: GraphState = {
+            "game_state": initial_state.game_state,
+            "agents": initial_state.agents,
+            "moderator": initial_state.moderator,
+            "events_buffer": initial_state.events_buffer,
+            "narration_log": initial_state.narration_log,
+            "night_deaths": initial_state.night_deaths,
+            "pending_hunter_shot": initial_state.pending_hunter_shot,
+            "pending_badge_decision": initial_state.pending_badge_decision,
+        }
+
+        final_state_dict = None
+        run_config = {"recursion_limit": MAX_GAME_DAYS * 5}
+        for state_dict in compiled_graph.stream(initial_dict, config=run_config):  # type: ignore[arg-type]
+            final_state_dict = state_dict
+
+        if final_state_dict:
+            last_key = list(final_state_dict.keys())[-1]
+            final_data = final_state_dict[last_key]
+            final_state = OrchestratorState(
+                game_state=final_data["game_state"],
+                agents=final_data["agents"],
+                moderator=final_data["moderator"],
+                events_buffer=final_data.get("events_buffer", []),
+                narration_log=final_data.get("narration_log", []),
+                night_deaths=final_data.get("night_deaths", []),
+                pending_hunter_shot=final_data.get("pending_hunter_shot"),
+                pending_badge_decision=final_data.get("pending_badge_decision"),
+            )
+            
+            for event in final_data.get("events_buffer", []):
+                self._log_event(event, final_state.game_state)
+        else:
+            final_state = initial_state
+
+        if not self.performance_config.skip_narration:
+            narration = self._moderator.announce_game_end(final_state.game_state)
+            final_state.narration_log.append(narration)
+        
+        self._finalize_game_log(final_state.game_state, final_state.narration_log)
+
+        if self._batch_executor:
+            self._batch_executor.shutdown()
+
+        return GameResult(
+            winning_team=final_state.game_state.winning_team,
+            final_state=final_state.game_state,
+            events=final_state.events_buffer,
+            narration_log=final_state.narration_log,
+            game_log=self._game_log,
+        )
