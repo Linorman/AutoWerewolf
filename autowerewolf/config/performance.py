@@ -44,7 +44,7 @@ class PerformanceConfig(BaseModel):
     max_reasoning_length: int = Field(
         default=200,
         ge=0,
-        le=500,
+        le=2000,
         description="Maximum reasoning length in characters"
     )
     memory_type: Literal["buffer", "summary"] = Field(
@@ -146,8 +146,8 @@ PERFORMANCE_PRESETS = {
         batch_size=6,
         skip_narration=True,
         compact_logs=True,
-        max_speech_length=200,
-        max_reasoning_length=50,
+        max_speech_length=1000,
+        max_reasoning_length=200,
     ),
     "standard": PerformanceConfig(
         verbosity=VerbosityLevel.STANDARD,
@@ -155,8 +155,8 @@ PERFORMANCE_PRESETS = {
         batch_size=4,
         skip_narration=False,
         compact_logs=False,
-        max_speech_length=500,
-        max_reasoning_length=200,
+        max_speech_length=2000,
+        max_reasoning_length=500,
     ),
     "verbose": PerformanceConfig(
         verbosity=VerbosityLevel.FULL,
@@ -164,8 +164,8 @@ PERFORMANCE_PRESETS = {
         batch_size=4,
         skip_narration=False,
         compact_logs=False,
-        max_speech_length=1000,
-        max_reasoning_length=500,
+        max_speech_length=5000,
+        max_reasoning_length=1000,
     ),
 }
 
