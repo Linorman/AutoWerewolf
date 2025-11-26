@@ -148,7 +148,8 @@ When narrating:
         return None
 
     def announce_night_start(self, game_state: GameState) -> str:
-        return f"Night {game_state.day_number} falls. All players close their eyes."
+        night_number = game_state.day_number + 1
+        return f"Night {night_number} falls. All players close their eyes."
 
     def announce_day_start(self, game_state: GameState, deaths: list[str]) -> str:
         if not deaths:

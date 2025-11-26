@@ -17,6 +17,7 @@ from autowerewolf.config.performance import (
 from autowerewolf.engine.roles import RoleSet
 from autowerewolf.engine.state import GameConfig, RuleVariants
 from autowerewolf.io.analysis import (
+    AdvancedGameAnalyzer,
     MultiGameAnalyzer,
     analyze_game,
     print_game_summary,
@@ -522,20 +523,150 @@ def analyze(
         ...,
         help="Directory containing game log files",
     ),
+    detailed: bool = typer.Option(
+        False,
+        "--detailed",
+        "-d",
+        help="Show detailed analysis report",
+    ),
+    export_csv: Optional[Path] = typer.Option(
+        None,
+        "--export",
+        "-e",
+        help="Export statistics to CSV file",
+    ),
 ) -> None:
     """Analyze multiple game logs and show aggregate statistics."""
     if not log_dir.exists():
         typer.echo(f"Error: Directory not found: {log_dir}", err=True)
         raise typer.Exit(code=1)
 
-    analyzer = MultiGameAnalyzer()
-    count = analyzer.load_from_directory(log_dir)
+    if detailed:
+        analyzer = AdvancedGameAnalyzer()
+        count = analyzer.load_from_directory(log_dir)
+        
+        if count == 0:
+            typer.echo("No valid game logs found in the directory.")
+            raise typer.Exit(code=1)
+        
+        typer.echo(analyzer.format_detailed_report())
+        
+        if export_csv:
+            analyzer.export_to_csv(export_csv)
+            typer.echo(f"\nStatistics exported to: {export_csv}")
+    else:
+        analyzer = MultiGameAnalyzer()
+        count = analyzer.load_from_directory(log_dir)
+        
+        if count == 0:
+            typer.echo("No valid game logs found in the directory.")
+            raise typer.Exit(code=1)
+        
+        typer.echo(analyzer.format_report())
 
-    if count == 0:
-        typer.echo("No valid game logs found in the directory.")
+
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "0.0.0.0",
+        "--host",
+        "-h",
+        help="Host to bind the server to",
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        "-p",
+        help="Port to run the server on",
+    ),
+) -> None:
+    """Start the web UI server."""
+    try:
+        from autowerewolf.web.server import run_server
+    except ImportError:
+        typer.echo("Error: Web dependencies not installed. Run: pip install autowerewolf[web]", err=True)
         raise typer.Exit(code=1)
+    
+    display_host = "localhost" if host == "0.0.0.0" else host
+    typer.echo(f"\n🐺 AutoWerewolf Web Server Starting...")
+    typer.echo(f"=" * 50)
+    typer.echo(f"  🎮 UI Page:    http://{display_host}:{port}/ui")
+    typer.echo(f"  📡 API Base:   http://{display_host}:{port}/api")
+    typer.echo(f"  📖 API Docs:   http://{display_host}:{port}/docs")
+    typer.echo(f"=" * 50)
+    typer.echo("Press Ctrl+C to stop\n")
+    run_server(host=host, port=port)
 
-    typer.echo(analyzer.format_report())
+
+@app.command()
+def play(
+    backend: str = typer.Option(
+        "ollama",
+        "--backend",
+        "-b",
+        help="Model backend: 'ollama' or 'api'",
+    ),
+    model_name: str = typer.Option(
+        "llama3",
+        "--model",
+        help="Model name to use",
+    ),
+    api_base: Optional[str] = typer.Option(
+        None,
+        "--api-base",
+        help="API base URL (for OpenAI-compatible API backend)",
+    ),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        help="API key (for API backend)",
+    ),
+    ollama_base_url: Optional[str] = typer.Option(
+        None,
+        "--ollama-url",
+        help="Ollama endpoint URL (default: http://localhost:11434)",
+    ),
+    role_set: str = typer.Option(
+        "A",
+        "--role-set",
+        "-r",
+        help="Role set to use: 'A' (Guard) or 'B' (Village Idiot)",
+    ),
+    seat: int = typer.Option(
+        1,
+        "--seat",
+        "-s",
+        help="Your seat number (1-12)",
+        min=1,
+        max=12,
+    ),
+    name: str = typer.Option(
+        "Human Player",
+        "--name",
+        "-n",
+        help="Your player name",
+    ),
+) -> None:
+    """Play a game as a human player with LLM opponents."""
+    typer.echo("AutoWerewolf - Human Player Mode\n")
+    typer.echo(f"You will be playing as {name} at seat {seat}")
+    typer.echo("Other players will be controlled by LLM agents.\n")
+    
+    game_config = create_game_config(role_set=role_set, seed=None)
+    agent_model_config = create_model_config(
+        backend=backend,
+        model_name=model_name,
+        api_base=api_base,
+        api_key=api_key,
+        ollama_base_url=ollama_base_url,
+    )
+    
+    typer.echo(f"Backend: {backend}")
+    typer.echo(f"Model: {model_name}")
+    typer.echo(f"Role Set: {role_set}\n")
+    
+    typer.echo("Note: Human player mode integration requires game orchestrator modifications.")
+    typer.echo("For now, please use the web UI with 'autowerewolf serve' for human play.\n")
 
 
 def main() -> None:

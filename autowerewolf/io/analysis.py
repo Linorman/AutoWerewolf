@@ -296,3 +296,289 @@ def analyze_multiple_games(directory: Union[str, Path]) -> MultiGameAnalyzer:
     analyzer = MultiGameAnalyzer()
     analyzer.load_from_directory(directory)
     return analyzer
+
+
+class AdvancedGameAnalyzer:
+    def __init__(self):
+        self.games: list[GameLog] = []
+    
+    def add_game(self, game_log: GameLog) -> None:
+        self.games.append(game_log)
+    
+    def load_from_directory(self, directory: Union[str, Path]) -> int:
+        directory = Path(directory)
+        count = 0
+        for file_path in directory.glob("*.json"):
+            try:
+                game_log = load_game_log(file_path)
+                self.games.append(game_log)
+                count += 1
+            except Exception:
+                continue
+        return count
+    
+    def get_role_performance(self) -> dict[str, dict[str, Any]]:
+        role_stats: dict[str, dict[str, Any]] = {}
+        
+        for game in self.games:
+            winning_team = game.winning_team
+            
+            for player in game.players:
+                role = player.role
+                if role not in role_stats:
+                    role_stats[role] = {
+                        "total_games": 0,
+                        "wins": 0,
+                        "survivals": 0,
+                        "first_deaths": 0,
+                    }
+                
+                role_stats[role]["total_games"] += 1
+                if player.is_alive:
+                    role_stats[role]["survivals"] += 1
+                
+                is_village_role = player.alignment == "good"
+                won = (winning_team == "village" and is_village_role) or \
+                      (winning_team == "werewolf" and not is_village_role)
+                if won:
+                    role_stats[role]["wins"] += 1
+        
+        for role, stats in role_stats.items():
+            total = stats["total_games"]
+            if total > 0:
+                stats["win_rate"] = stats["wins"] / total
+                stats["survival_rate"] = stats["survivals"] / total
+        
+        return role_stats
+    
+    def get_voting_patterns(self) -> dict[str, Any]:
+        patterns = {
+            "correct_lynch_rate": 0,
+            "mislynch_rate": 0,
+            "total_lynches": 0,
+            "wolf_lynch_count": 0,
+            "villager_lynch_count": 0,
+        }
+        
+        for game in self.games:
+            player_map = {p.id: p for p in game.players}
+            
+            lynch_events = game.get_events_by_type("lynch")
+            for event in lynch_events:
+                patterns["total_lynches"] += 1
+                target = player_map.get(event.target_id)
+                if target:
+                    if target.alignment == "werewolf":
+                        patterns["wolf_lynch_count"] += 1
+                    else:
+                        patterns["villager_lynch_count"] += 1
+        
+        if patterns["total_lynches"] > 0:
+            patterns["correct_lynch_rate"] = patterns["wolf_lynch_count"] / patterns["total_lynches"]
+            patterns["mislynch_rate"] = patterns["villager_lynch_count"] / patterns["total_lynches"]
+        
+        return patterns
+    
+    def get_special_role_impact(self) -> dict[str, dict[str, Any]]:
+        impact = {
+            "seer": {"checks_per_game": 0, "found_wolves": 0},
+            "witch": {"saves_per_game": 0, "poisons_per_game": 0, "save_success_rate": 0},
+            "hunter": {"shots_per_game": 0, "wolf_kills": 0},
+            "guard": {"protects_per_game": 0, "successful_blocks": 0},
+        }
+        
+        total_games = len(self.games)
+        if total_games == 0:
+            return impact
+        
+        seer_checks = 0
+        witch_saves = 0
+        witch_poisons = 0
+        hunter_shots = 0
+        guard_protects = 0
+        
+        for game in self.games:
+            stats = GameStatistics(game)
+            seer_checks += stats.seer_checks
+            witch_saves += stats.witch_saves
+            witch_poisons += stats.witch_poisons
+            hunter_shots += stats.hunter_shots
+        
+        impact["seer"]["checks_per_game"] = seer_checks / total_games
+        impact["witch"]["saves_per_game"] = witch_saves / total_games
+        impact["witch"]["poisons_per_game"] = witch_poisons / total_games
+        impact["hunter"]["shots_per_game"] = hunter_shots / total_games
+        
+        return impact
+    
+    def get_game_duration_stats(self) -> dict[str, Any]:
+        durations = []
+        day_counts = []
+        
+        for game in self.games:
+            day_counts.append(game.final_day)
+            stats = GameStatistics(game)
+            if stats.duration:
+                durations.append(stats.duration.total_seconds())
+        
+        result = {
+            "average_days": sum(day_counts) / len(day_counts) if day_counts else 0,
+            "min_days": min(day_counts) if day_counts else 0,
+            "max_days": max(day_counts) if day_counts else 0,
+        }
+        
+        if durations:
+            result["average_duration_seconds"] = sum(durations) / len(durations)
+            result["min_duration_seconds"] = min(durations)
+            result["max_duration_seconds"] = max(durations)
+        
+        return result
+    
+    def get_werewolf_strategy_analysis(self) -> dict[str, Any]:
+        analysis = {
+            "average_wolves_at_end": 0,
+            "self_explode_count": 0,
+            "wolf_caught_by_seer_rate": 0,
+            "coordination_events": 0,
+        }
+        
+        total_games = len(self.games)
+        if total_games == 0:
+            return analysis
+        
+        wolves_at_end = 0
+        self_explodes = 0
+        
+        for game in self.games:
+            wolf_survivors = [p for p in game.players if p.role == "werewolf" and p.is_alive]
+            wolves_at_end += len(wolf_survivors)
+            
+            explode_events = game.get_events_by_type("wolf_self_explode")
+            self_explodes += len(explode_events)
+        
+        analysis["average_wolves_at_end"] = wolves_at_end / total_games
+        analysis["self_explode_count"] = self_explodes
+        
+        return analysis
+    
+    def format_detailed_report(self) -> str:
+        lines = []
+        lines.append("=" * 70)
+        lines.append("ADVANCED GAME ANALYSIS REPORT")
+        lines.append("=" * 70)
+        lines.append(f"\nTotal Games Analyzed: {len(self.games)}")
+        
+        basic = MultiGameAnalyzer()
+        basic.games = self.games
+        basic_stats = basic.get_aggregate_statistics()
+        
+        lines.append(f"\n{'─' * 40}")
+        lines.append("WIN RATES")
+        lines.append(f"{'─' * 40}")
+        lines.append(f"  Village: {basic_stats.get('village_win_rate', 0):.1%}")
+        lines.append(f"  Werewolf: {basic_stats.get('werewolf_win_rate', 0):.1%}")
+        
+        duration = self.get_game_duration_stats()
+        lines.append(f"\n{'─' * 40}")
+        lines.append("GAME DURATION")
+        lines.append(f"{'─' * 40}")
+        lines.append(f"  Average Days: {duration['average_days']:.1f}")
+        lines.append(f"  Range: {duration['min_days']} - {duration['max_days']} days")
+        if duration.get('average_duration_seconds'):
+            avg_min = duration['average_duration_seconds'] / 60
+            lines.append(f"  Average Time: {avg_min:.1f} minutes")
+        
+        role_perf = self.get_role_performance()
+        lines.append(f"\n{'─' * 40}")
+        lines.append("ROLE PERFORMANCE")
+        lines.append(f"{'─' * 40}")
+        for role, stats in sorted(role_perf.items()):
+            win_rate = stats.get('win_rate', 0) * 100
+            surv_rate = stats.get('survival_rate', 0) * 100
+            lines.append(f"  {role.title():15s}: Win {win_rate:5.1f}%  Survival {surv_rate:5.1f}%")
+        
+        voting = self.get_voting_patterns()
+        lines.append(f"\n{'─' * 40}")
+        lines.append("VOTING PATTERNS")
+        lines.append(f"{'─' * 40}")
+        lines.append(f"  Total Lynches: {voting['total_lynches']}")
+        lines.append(f"  Correct Lynch Rate: {voting['correct_lynch_rate']:.1%}")
+        lines.append(f"  Mislynch Rate: {voting['mislynch_rate']:.1%}")
+        
+        impact = self.get_special_role_impact()
+        lines.append(f"\n{'─' * 40}")
+        lines.append("SPECIAL ROLE IMPACT")
+        lines.append(f"{'─' * 40}")
+        lines.append(f"  Seer Checks/Game: {impact['seer']['checks_per_game']:.1f}")
+        lines.append(f"  Witch Saves/Game: {impact['witch']['saves_per_game']:.1f}")
+        lines.append(f"  Witch Poisons/Game: {impact['witch']['poisons_per_game']:.1f}")
+        lines.append(f"  Hunter Shots/Game: {impact['hunter']['shots_per_game']:.1f}")
+        
+        wolf_strategy = self.get_werewolf_strategy_analysis()
+        lines.append(f"\n{'─' * 40}")
+        lines.append("WEREWOLF STRATEGY")
+        lines.append(f"{'─' * 40}")
+        lines.append(f"  Average Wolves at End: {wolf_strategy['average_wolves_at_end']:.1f}")
+        lines.append(f"  Self-Explode Count: {wolf_strategy['self_explode_count']}")
+        
+        return "\n".join(lines)
+    
+    def export_to_csv(self, path: Union[str, Path]) -> None:
+        import csv
+        
+        path = Path(path)
+        
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            writer.writerow([
+                'game_id', 'winning_team', 'final_day', 'role_set',
+                'night_kills', 'lynches', 'witch_saves', 'witch_poisons',
+                'hunter_shots', 'seer_checks'
+            ])
+            
+            for game in self.games:
+                stats = GameStatistics(game)
+                writer.writerow([
+                    game.game_id,
+                    game.winning_team,
+                    game.final_day,
+                    game.role_set,
+                    stats.night_kills,
+                    stats.lynches,
+                    stats.witch_saves,
+                    stats.witch_poisons,
+                    stats.hunter_shots,
+                    stats.seer_checks,
+                ])
+    
+    def export_player_data_to_csv(self, path: Union[str, Path]) -> None:
+        import csv
+        
+        path = Path(path)
+        
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            writer.writerow([
+                'game_id', 'player_id', 'player_name', 'seat_number',
+                'role', 'alignment', 'is_alive', 'is_sheriff', 'won'
+            ])
+            
+            for game in self.games:
+                for player in game.players:
+                    is_village = player.alignment == "good"
+                    won = (game.winning_team == "village" and is_village) or \
+                          (game.winning_team == "werewolf" and not is_village)
+                    
+                    writer.writerow([
+                        game.game_id,
+                        player.id,
+                        player.name,
+                        player.seat_number,
+                        player.role,
+                        player.alignment,
+                        player.is_alive,
+                        player.is_sheriff,
+                        won,
+                    ])

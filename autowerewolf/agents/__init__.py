@@ -8,6 +8,12 @@ from autowerewolf.agents.batch import (
     RateLimiter,
     create_batch_executor,
 )
+from autowerewolf.agents.human import (
+    CLIInputHandler,
+    HumanPlayerAgent,
+    WebInputHandler,
+    create_human_agent,
+)
 from autowerewolf.agents.memory import (
     AgentMemory,
     ConversationMemory,
@@ -67,6 +73,10 @@ __all__ = [
     "BatchResult",
     "RateLimiter",
     "create_batch_executor",
+    "HumanPlayerAgent",
+    "CLIInputHandler",
+    "WebInputHandler",
+    "create_human_agent",
     "AgentMemory",
     "ConversationMemory",
     "GameFact",

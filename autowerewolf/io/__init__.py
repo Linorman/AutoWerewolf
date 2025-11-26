@@ -1,6 +1,7 @@
 """I/O utilities for AutoWerewolf."""
 
 from autowerewolf.io.analysis import (
+    AdvancedGameAnalyzer,
     GameStatistics,
     MultiGameAnalyzer,
     analyze_game,
@@ -32,6 +33,7 @@ from autowerewolf.io.persistence import (
 )
 
 __all__ = [
+    "AdvancedGameAnalyzer",
     "EventLog",
     "GameLog",
     "GameLogLevel",

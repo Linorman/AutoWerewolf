@@ -62,10 +62,17 @@ class SheriffDecisionOutput(BaseModel):
     @classmethod
     def accept_aliases(cls, data):
         if isinstance(data, dict):
-            for alias in ["run", "participate", "candidate", "running"]:
+            for alias in ["run", "participate", "candidate", "running", "decision"]:
                 if alias in data and "run_for_sheriff" not in data:
                     data["run_for_sheriff"] = data.pop(alias)
                     break
+            if "run_for_sheriff" in data and isinstance(data["run_for_sheriff"], str):
+                value = data["run_for_sheriff"].lower().strip()
+                negative_indicators = [
+                    "not", "no", "false", "decline", "refuse", "don't", "won't",
+                    "skip", "pass", "abstain", "negative"
+                ]
+                data["run_for_sheriff"] = not any(neg in value for neg in negative_indicators)
         return data
 
 
