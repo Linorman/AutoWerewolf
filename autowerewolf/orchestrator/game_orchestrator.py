@@ -18,6 +18,7 @@ from autowerewolf.agents.player_base import (
     GameView,
     create_player_agent,
 )
+from autowerewolf.agents.roles.werewolf import WerewolfAgent, WerewolfDiscussionChain
 from autowerewolf.agents.schemas import (
     BadgeDecisionOutput,
     GuardNightOutput,
@@ -139,6 +140,7 @@ class GameOrchestrator:
         self._moderator: Optional[ModeratorChain] = None
         self._graph: Optional[StateGraph] = None
         self._batch_executor: Optional[BatchExecutor] = None
+        self._werewolf_camp_memory: Optional[WerewolfCampMemory] = None
         
         self._game_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
         self._log_level = log_level
@@ -147,6 +149,14 @@ class GameOrchestrator:
         self._enable_file_logging = enable_file_logging
         self._game_logger: Optional[GameLogger] = None
         self._game_log: Optional[GameLog] = None
+
+    def _record_werewolf_discussion(
+        self,
+        night_number: int,
+        discussions: list[dict[str, Any]],
+    ) -> None:
+        if self._game_log and discussions:
+            self._game_log.add_werewolf_discussion(night_number, discussions)
 
     def _initialize_game(self) -> GameState:
         return create_game_state(self.config, self.player_names)
@@ -336,47 +346,78 @@ class GameOrchestrator:
     def _collect_werewolf_action(
         self,
         state: OrchestratorState,
-    ) -> Optional[WolfKillAction]:
+    ) -> tuple[Optional[WolfKillAction], list[dict[str, Any]]]:
         wolves = state.game_state.get_alive_werewolves()
         if not wolves:
-            return None
+            return None, []
 
         valid_targets = get_valid_wolf_targets(
             state.game_state,
             include_self_knife=state.game_state.config.rule_variants.allow_wolf_self_knife,
         )
 
-        lead_wolf = wolves[0]
-        action_context = {
-            "valid_targets": valid_targets,
-            "teammates": [w.id for w in wolves if w.id != lead_wolf.id],
-        }
+        werewolf_agents: list[WerewolfAgent] = []
+        for wolf in wolves:
+            agent = state.agents.get(wolf.id)
+            if agent and isinstance(agent, WerewolfAgent):
+                werewolf_agents.append(agent)
 
-        agent = state.agents.get(lead_wolf.id)
-        if not agent:
-            return None
+        if not werewolf_agents:
+            return None, []
 
+        discussions: list[dict[str, Any]] = []
         try:
-            game_view = self.build_game_view(
-                state.game_state, lead_wolf.id, action_context
+            lead_wolf = wolves[0]
+            chat_model = werewolf_agents[0].chat_model
+            discussion_chain = WerewolfDiscussionChain(
+                werewolf_agents=werewolf_agents,
+                chat_model=chat_model,
+                camp_memory=self._werewolf_camp_memory,
             )
-            result = agent.decide_night_action(game_view)
 
-            if isinstance(result, WerewolfNightOutput):
-                if result.self_explode:
-                    return None
-                if result.kill_target_id in valid_targets:
-                    return WolfKillAction(
-                        actor_id=lead_wolf.id,
-                        target_id=result.kill_target_id,
+            game_view = self.build_game_view(
+                state.game_state,
+                lead_wolf.id,
+                {
+                    "valid_targets": valid_targets,
+                    "teammates": [w.id for w in wolves if w.id != lead_wolf.id],
+                },
+            )
+
+            proposals = discussion_chain.get_proposals(game_view)
+            for wolf_id, proposal in proposals:
+                wolf_player = state.game_state.get_player(wolf_id)
+                discussions.append({
+                    "werewolf_id": wolf_id,
+                    "werewolf_name": wolf_player.name if wolf_player else wolf_id,
+                    "proposed_target": proposal.target_player_id,
+                    "reasoning": proposal.reasoning,
+                })
+
+            consensus_target = discussion_chain.reach_consensus(game_view, proposals)
+
+            if self._werewolf_camp_memory:
+                for wolf_id, proposal in proposals:
+                    self._werewolf_camp_memory.add_discussion_note(
+                        state.game_state.day_number,
+                        wolf_id,
+                        f"Proposed {proposal.target_player_id}: {proposal.reasoning}",
                     )
+                self._werewolf_camp_memory.add_kill(state.game_state.day_number, consensus_target)
+
+            if consensus_target and consensus_target in valid_targets:
+                return WolfKillAction(
+                    actor_id=lead_wolf.id,
+                    target_id=consensus_target,
+                ), discussions
+
         except Exception as e:
-            logger.warning(f"Werewolf action failed: {e}")
+            logger.warning(f"Werewolf discussion failed: {e}")
 
         if valid_targets:
             target = random.choice(valid_targets)
-            return WolfKillAction(actor_id=lead_wolf.id, target_id=target)
-        return None
+            return WolfKillAction(actor_id=wolves[0].id, target_id=target), discussions
+        return None, discussions
 
     def _collect_seer_action(
         self,
@@ -505,12 +546,15 @@ class GameOrchestrator:
         if guard_action:
             actions.append(guard_action)
 
-        wolf_action = self._collect_werewolf_action(state)
+        wolf_action, wolf_discussions = self._collect_werewolf_action(state)
         if wolf_action:
             actions.append(wolf_action)
             new_state = deepcopy(state.game_state)
             new_state.wolf_kill_target_id = wolf_action.target_id
             state.game_state = new_state
+
+        if wolf_discussions:
+            self._record_werewolf_discussion(state.game_state.day_number, wolf_discussions)
 
         cure_action, poison_action = self._collect_witch_action(state)
         if cure_action:
@@ -522,14 +566,12 @@ class GameOrchestrator:
         if seer_action:
             actions.append(seer_action)
 
-        # Record alive players before resolving night actions
         alive_before = set(p.id for p in state.game_state.get_alive_players())
 
         new_game_state, events = resolve_night_actions(state.game_state, actions)
         state.game_state = new_game_state
         state.events_buffer.extend(events)
 
-        # Find newly dead players by comparing with alive_before
         alive_after = set(p.id for p in state.game_state.get_alive_players())
         state.night_deaths = list(alive_before - alive_after)
 

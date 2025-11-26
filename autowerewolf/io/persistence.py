@@ -43,7 +43,15 @@ class GameLog(BaseModel):
     players: list[PlayerLog] = Field(default_factory=list)
     events: list[EventLog] = Field(default_factory=list)
     narration_log: list[str] = Field(default_factory=list)
+    werewolf_discussions: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     statistics: dict[str, Any] = Field(default_factory=dict)
+
+    def add_werewolf_discussion(
+        self,
+        night_number: int,
+        discussions: list[dict[str, Any]],
+    ) -> None:
+        self.werewolf_discussions[str(night_number)] = discussions
 
     def add_event(
         self,
