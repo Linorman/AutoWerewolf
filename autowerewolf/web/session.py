@@ -2,6 +2,7 @@ import logging
 import queue
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConf
 from autowerewolf.config.performance import PERFORMANCE_PRESETS
 from autowerewolf.engine.roles import Role, RoleSet, WinningTeam
 from autowerewolf.engine.state import Event, GameConfig, GameState
+from autowerewolf.io.persistence import save_game_log
 from autowerewolf.orchestrator.game_orchestrator import GameOrchestrator, GameResult
 from autowerewolf.web.schemas import (
     ActionSubmitRequest,
@@ -174,6 +176,9 @@ class GameSession:
     def stop(self) -> None:
         self._stop_event.set()
         self.status = "stopped"
+        if self.orchestrator:
+            self.orchestrator.request_stop()
+            logger.info(f"Game {self.game_id} stop requested")
 
     def _run_game(self) -> None:
         try:
@@ -181,11 +186,15 @@ class GameSession:
             game_config = self._create_game_config()
             perf_config = PERFORMANCE_PRESETS["standard"]
             
+            default_logs_dir = Path.cwd() / "logs"
+            default_logs_dir.mkdir(parents=True, exist_ok=True)
+            
             self.orchestrator = GameOrchestrator(
                 config=game_config,
                 agent_models=agent_model_config,
                 enable_console_logging=False,
-                enable_file_logging=False,
+                enable_file_logging=True,
+                output_path=default_logs_dir,
                 performance_config=perf_config,
                 event_callback=self._on_event,
                 narration_callback=self._on_narration,
@@ -193,10 +202,29 @@ class GameSession:
             
             self.result = self.orchestrator.run_game()
             
+            # Check if game was stopped externally
+            if self._stop_event.is_set() or self.orchestrator.is_stop_requested():
+                with self._lock:
+                    if self.orchestrator._game_state:
+                        self.game_state = self.orchestrator._game_state
+                self.status = "stopped"
+                logger.info(f"Game {self.game_id} was stopped")
+                
+                self._realtime_event_queue.put({
+                    "type": "game_stopped",
+                    "message": "Game was stopped by user",
+                })
+                return
+            
             if self.result:
                 with self._lock:
                     self.game_state = self.result.final_state
                 self.status = "completed"
+                
+                if self.result.game_log:
+                    log_path = default_logs_dir / f"logs-{self.orchestrator._game_id}.json"
+                    save_game_log(self.result.game_log, log_path)
+                    logger.info(f"Game log saved to: {log_path}")
                 
                 self._realtime_event_queue.put({
                     "type": "game_over",
@@ -204,12 +232,21 @@ class GameSession:
                 })
             
         except Exception as e:
-            logger.error(f"Game error: {e}")
-            self.status = "error"
-            self._realtime_event_queue.put({
-                "type": "error",
-                "message": str(e),
-            })
+            # Check if this was due to a stop request
+            if self._stop_event.is_set():
+                self.status = "stopped"
+                logger.info(f"Game {self.game_id} was stopped")
+                self._realtime_event_queue.put({
+                    "type": "game_stopped",
+                    "message": "Game was stopped by user",
+                })
+            else:
+                logger.error(f"Game error: {e}")
+                self.status = "error"
+                self._realtime_event_queue.put({
+                    "type": "error",
+                    "message": str(e),
+                })
 
     def get_state_response(self) -> Optional[GameStateResponse]:
         with self._lock:

@@ -456,6 +456,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Events will appear here",
         "zh": "事件将在此显示",
     },
+    "all": {
+        "en": "All",
+        "zh": "全部",
+    },
+    "narration": {
+        "en": "Narration",
+        "zh": "旁白",
+    },
     "click_to_start": {
         "en": "Click 'Start Game' to begin",
         "zh": "点击「开始游戏」开始",
@@ -587,6 +595,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "clear_log": {
         "en": "Clear Log",
         "zh": "清空日志",
+    },
+    "good_team_victory": {
+        "en": "The village has successfully eliminated all werewolves!",
+        "zh": "村民成功消灭了所有狼人！",
+    },
+    "evil_team_victory": {
+        "en": "The werewolves have taken over the village!",
+        "zh": "狼人占领了村庄！",
     },
 }
 

@@ -44,7 +44,7 @@ STANDARD_PROMPTS = {
     PromptKey.BASE_SYSTEM: (
         "You are playing Werewolf (Mafia-style social deduction game). "
         "Act according to your role's objectives. Be strategic and concise. "
-        "You must respond in JSON format."
+        "You must respond in strict JSON format. Include a 'thought' field for reasoning."
     ),
     PromptKey.VILLAGER_SYSTEM: (
         "You are a VILLAGER. No special abilities. "
@@ -52,37 +52,39 @@ STANDARD_PROMPTS = {
     ),
     PromptKey.WEREWOLF_SYSTEM: (
         "You are a WEREWOLF. Kill villagers without being discovered. "
-        "At night, choose a target. During day, blend in and deflect suspicion. "
-        "Win: Eliminate all villagers OR all special roles."
+        "Night Action: {{\"kill_target_id\": \"id\"}}. "
+        "Day: Blend in and deflect suspicion."
     ),
     PromptKey.SEER_SYSTEM: (
         "You are the SEER. Each night, check one player's alignment. "
-        "Use information strategically - reveal wisely. Help the village win."
+        "Night Action: {{\"check_target_id\": \"id\"}}. "
+        "Use information strategically."
     ),
     PromptKey.WITCH_SYSTEM: (
-        "You are the WITCH. You have: "
-        "1) CURE: Save the attacked player (once). "
-        "2) POISON: Kill any player (once). "
+        "You are the WITCH. Potions: CURE(1x) or POISON(1x). "
+        "Night Action: {{\"use_cure\": bool, \"use_poison\": bool, \"poison_target_id\": \"id\"}}. "
         "Only ONE potion per night."
     ),
     PromptKey.HUNTER_SYSTEM: (
         "You are the HUNTER. When you die (vote or wolf attack, NOT poison), "
-        "shoot one player. Use wisely on suspected werewolves."
+        "shoot one player. "
+        "Death Action: {{\"shoot\": bool, \"target_player_id\": \"id\"}}."
     ),
     PromptKey.GUARD_SYSTEM: (
-        "You are the GUARD. Each night, protect one player from werewolves. "
-        "Cannot protect same player two nights in a row."
+        "You are the GUARD. Protect one player per night. "
+        "Night Action: {{\"protect_target_id\": \"id\"}}. "
+        "Cannot protect same player twice in a row."
     ),
     PromptKey.VILLAGE_IDIOT_SYSTEM: (
-        "You are the VILLAGE IDIOT. If lynched, reveal identity to survive "
-        "(lose voting rights). Play like normal villager."
+        "You are the VILLAGE IDIOT. If lynched, reveal identity to survive. "
+        "Play like normal villager."
     ),
-    PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action.",
-    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Be persuasive.",
-    PromptKey.VOTE: "{context}\n\nCast your vote. You MUST choose exactly one player from the valid_targets list.",
-    PromptKey.LAST_WORDS: "{context}\n\nDeliver your last words.",
-    PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff.",
-    PromptKey.BADGE_PASS: "{context}\n\nYou are dying as sheriff. Pass or tear the badge.",
+    PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action. Return JSON.",
+    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Return JSON with 'content'.",
+    PromptKey.VOTE: "{context}\n\nCast your vote. Return JSON with 'target_player_id' and 'reasoning'.",
+    PromptKey.LAST_WORDS: "{context}\n\nDeliver your last words. Return JSON with 'content'.",
+    PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff. Return JSON with 'run_for_sheriff' (bool).",
+    PromptKey.BADGE_PASS: "{context}\n\nPass or tear badge. Return JSON with 'action' ('pass'/'tear') and 'target_player_id'.",
 }
 
 
@@ -92,7 +94,9 @@ FULL_PROMPTS = {
         "You must act according to your role's objectives. "
         "Analyze the game state carefully and make strategic decisions. "
         "Consider all available information before acting. "
-        "You must respond in JSON format."
+        "RESPONSE FORMAT: You must respond in strict JSON format. "
+        "Include a 'thought' field to explain your reasoning step-by-step, "
+        "and then the specific fields required for your action."
     ),
     PromptKey.VILLAGER_SYSTEM: (
         "You are a VILLAGER. You have no special abilities. "
@@ -104,12 +108,14 @@ FULL_PROMPTS = {
     PromptKey.WEREWOLF_SYSTEM: (
         "You are a WEREWOLF. Your goal is to eliminate villagers without being discovered. "
         "At night, coordinate with your fellow werewolves to choose a target to kill. "
+        "Night Action Format: {{\"kill_target_id\": \"<player_id>\"}}\n"
         "During the day, blend in with villagers and deflect suspicion onto others. "
         "You can claim to be any role to survive - consider claiming villager or a power role strategically. "
         "Win condition: Eliminate all villagers OR all special roles."
     ),
     PromptKey.SEER_SYSTEM: (
         "You are the SEER. Each night, you can check one player to learn if they are good or a werewolf. "
+        "Night Action Format: {{\"check_target_id\": \"<player_id>\"}}\n"
         "Use this information strategically - revealing too early may get you killed, "
         "but waiting too long means the information dies with you. "
         "'Gold water' means a verified good player. 'Checked kill' means a verified werewolf. "
@@ -119,6 +125,7 @@ FULL_PROMPTS = {
         "You are the WITCH. You have two one-time-use potions: "
         "1) CURE: Save the player killed by werewolves tonight (you'll be told who). "
         "2) POISON: Kill any player of your choice. "
+        "Night Action Format: {{\"use_cure\": true/false, \"use_poison\": true/false, \"poison_target_id\": \"<player_id>\"}}\n"
         "You can only use ONE potion per night. Use them wisely - they are your most powerful tools. "
         "'Silver water' refers to someone you saved - usually considered trustworthy. "
         "Your goal is to help the village win by using your potions at critical moments."
@@ -126,12 +133,14 @@ FULL_PROMPTS = {
     PromptKey.HUNTER_SYSTEM: (
         "You are the HUNTER. When you die (by vote or werewolf attack, NOT poison), "
         "you can shoot one player to take them with you. "
+        "Death Action Format: {{\"shoot\": true/false, \"target_player_id\": \"<player_id>\"}}\n"
         "During the day, participate in discussions and voting normally. "
         "Use your shot wisely - ideally take out a confirmed or suspected werewolf. "
         "You CANNOT shoot if killed by the Witch's poison. The moderator will inform you of your status."
     ),
     PromptKey.GUARD_SYSTEM: (
         "You are the GUARD. Each night, you can protect one player from werewolf attacks. "
+        "Night Action Format: {{\"protect_target_id\": \"<player_id>\"}}\n"
         "You CANNOT protect the same player two nights in a row. "
         "Warning: If you protect someone the Witch also saves, they still die ('same guard same save'). "
         "Consider protecting key roles like the Seer if their identity is revealed. "
@@ -144,12 +153,12 @@ FULL_PROMPTS = {
         "Play like a normal villager but remember your safety net against mislynch. "
         "If killed at night, you die normally without protection."
     ),
-    PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action. Consider all available information.",
-    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Be persuasive and strategic.",
-    PromptKey.VOTE: "{context}\n\nCast your vote. You MUST select exactly one player_id from the valid_targets list provided. Do not return null or empty.",
-    PromptKey.LAST_WORDS: "{context}\n\nYou are dying. Deliver your last words to help your team.",
-    PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff. Consider your role and strategy.",
-    PromptKey.BADGE_PASS: "{context}\n\nYou are dying as sheriff. Decide to pass or tear the badge.",
+    PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action. Ensure your JSON response matches your role's action format.",
+    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Be persuasive and strategic. Return JSON with a 'content' field.",
+    PromptKey.VOTE: "{context}\n\nCast your vote. You MUST select exactly one player_id from the valid_targets list provided. Return JSON with 'target_player_id' and 'reasoning'.",
+    PromptKey.LAST_WORDS: "{context}\n\nYou are dying. Deliver your last words to help your team. Return JSON with 'content'.",
+    PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff. Consider your role and strategy. Return JSON with 'run_for_sheriff' (bool).",
+    PromptKey.BADGE_PASS: "{context}\n\nYou are dying as sheriff. Decide to pass or tear the badge. Return JSON with 'action' ('pass' or 'tear') and 'target_player_id' (if passing).",
 }
 
 

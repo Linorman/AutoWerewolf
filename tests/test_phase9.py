@@ -405,15 +405,17 @@ class TestAdvancedGameAnalyzer:
 
 class TestWebServer:
     def test_web_module_imports(self):
-        from autowerewolf.web.server import create_app
-        from autowerewolf.web.game_manager import GameManager, GameSession
+        from autowerewolf.web.server import app, run_server
+        from autowerewolf.web.session import session_manager, GameSession
         
-        assert create_app is not None
-        assert GameManager is not None
+        assert app is not None
+        assert run_server is not None
+        assert session_manager is not None
         assert GameSession is not None
     
     def test_game_manager_initialization(self):
-        from autowerewolf.web.game_manager import GameManager
+        from autowerewolf.web.session import session_manager
         
-        manager = GameManager()
-        assert len(manager.sessions) == 0
+        # Session manager is a singleton
+        assert hasattr(session_manager, '_sessions')
+        assert isinstance(session_manager._sessions, dict)

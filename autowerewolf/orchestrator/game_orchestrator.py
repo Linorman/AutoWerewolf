@@ -137,6 +137,7 @@ class GameOrchestrator:
         self._werewolf_camp_memory: Optional[WerewolfCampMemory] = None
         self._event_callback = event_callback
         self._narration_callback = narration_callback
+        self._stop_requested = False
         
         self._game_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
         self._log_level = log_level
@@ -145,6 +146,13 @@ class GameOrchestrator:
         self._enable_file_logging = enable_file_logging
         self._game_logger: Optional[GameLogger] = None
         self._game_log: Optional[GameLog] = None
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+        logger.info("Game stop requested")
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_requested
 
     def _emit_event(self, event: Event, game_state: GameState) -> None:
         if self._event_callback:
@@ -1044,18 +1052,26 @@ class GameOrchestrator:
         graph.add_node("check_win", check_win_node)
 
         def route_after_night(state: GraphState) -> str:
+            if self._stop_requested:
+                return END
             return "day"
 
         def route_after_day(state: GraphState) -> str:
+            if self._stop_requested:
+                return END
             orch_state = dict_to_orchestrator_state(state)
             if orch_state.game_state.is_game_over():
                 return END
             return "transition_to_night"
 
         def route_after_transition(state: GraphState) -> str:
+            if self._stop_requested:
+                return END
             return "check_win"
 
         def route_after_check_win(state: GraphState) -> str:
+            if self._stop_requested:
+                return END
             orch_state = dict_to_orchestrator_state(state)
             if orch_state.game_state.is_game_over():
                 return END

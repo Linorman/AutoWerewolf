@@ -11,7 +11,7 @@ class GameMode(str, Enum):
 
 class WebModelConfig(BaseModel):
     backend: Literal["ollama", "api"] = "ollama"
-    model_name: str = "llama3"
+    model_name: str = "qwen3:4b-instruct-2507-q4_K_M"
     api_base: Optional[str] = None
     api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
@@ -88,6 +88,7 @@ class WSMessageType(str, Enum):
     ACTION_REQUEST = "action_request"
     ACTION_RESPONSE = "action_response"
     GAME_OVER = "game_over"
+    GAME_STOPPED = "game_stopped"
     ERROR = "error"
     CONNECTED = "connected"
     LOG = "log"

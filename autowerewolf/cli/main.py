@@ -309,7 +309,9 @@ def run_game(
         raise typer.Exit(code=1)
 
     game_log_level = GameLogLevel(log_level.lower())
-    output_path = output.parent if output else None
+    
+    default_logs_dir = Path.cwd() / "logs"
+    output_path = output.parent if output else default_logs_dir
 
     orchestrator = GameOrchestrator(
         config=game_config,
@@ -317,7 +319,7 @@ def run_game(
         log_level=game_log_level,
         output_path=output_path,
         enable_console_logging=True,
-        enable_file_logging=output is not None,
+        enable_file_logging=True,  # Always enable file logging
         performance_config=perf_config,
     )
 
@@ -333,9 +335,18 @@ def run_game(
         result = orchestrator.run_game()
         print_game_result(result)
 
-        if output and result.game_log:
-            save_game_log(result.game_log, output)
-            typer.echo(f"\nGame log saved to: {output}")
+        # Save game log - use custom output path or default logs folder
+        if result.game_log:
+            if output:
+                save_game_log(result.game_log, output)
+                typer.echo(f"\nGame log saved to: {output}")
+            else:
+                # Save to default logs folder with timestamped filename
+                default_logs_dir = Path.cwd() / "logs"
+                default_logs_dir.mkdir(parents=True, exist_ok=True)
+                default_log_path = default_logs_dir / f"logs-{orchestrator._game_id}.json"
+                save_game_log(result.game_log, default_log_path)
+                typer.echo(f"\nGame log saved to: {default_log_path}")
 
     except Exception as e:
         typer.echo(f"\nError during game: {e}", err=True)
