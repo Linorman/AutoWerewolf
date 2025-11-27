@@ -84,7 +84,12 @@ Set self_explode=true ONLY if you want to reveal yourself and end the day immedi
     def decide_night_action(self, game_view: GameView) -> WerewolfNightOutput:
         context = game_view.to_prompt_context()
         teammates_info = ", ".join(self.werewolf_teammates) if self.werewolf_teammates else "Unknown"
-        return self.night_chain.invoke({"context": context, "teammates": teammates_info})
+        return self._invoke_with_correction(
+            self.night_chain,
+            {"context": context, "teammates": teammates_info},
+            WerewolfNightOutput,
+            context,
+        )
 
     def decide_self_explode(self, game_view: GameView) -> bool:
         prompt = ChatPromptTemplate.from_messages([
@@ -103,7 +108,12 @@ Respond with just true or false."""),
 
         chain = prompt | self.chat_model.with_structured_output(SelfExplodeDecision)
         context = game_view.to_prompt_context()
-        result: SelfExplodeDecision = chain.invoke({"context": context})  # type: ignore
+        result: SelfExplodeDecision = self._invoke_with_correction(
+            chain,
+            {"context": context},
+            SelfExplodeDecision,
+            context,
+        )
         return result.should_explode
 
     def _build_speech_chain(self) -> RunnableSerializable:
@@ -149,11 +159,13 @@ Provide your proposal with reasoning."""),
         chain = prompt | self.chat_model.with_structured_output(WerewolfProposalOutput)
         context = game_view.to_prompt_context()
         teammates_info = ", ".join(self.werewolf_teammates) if self.werewolf_teammates else "Unknown"
-        result = chain.invoke({
-            "context": context,
-            "teammates": teammates_info,
-        })
-        return result  # type: ignore
+        
+        return self._invoke_with_correction(
+            chain,
+            {"context": context, "teammates": teammates_info},
+            WerewolfProposalOutput,
+            context,
+        )
 
 
 class SelfExplodeDecision(BaseModel):

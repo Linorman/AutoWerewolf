@@ -604,6 +604,50 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "The werewolves have taken over the village!",
         "zh": "狼人占领了村庄！",
     },
+    "output_corrector": {
+        "en": "Output Corrector",
+        "zh": "输出校正器",
+    },
+    "enable_corrector": {
+        "en": "Enable Corrector",
+        "zh": "启用校正器",
+    },
+    "corrector_retries": {
+        "en": "Max Retries",
+        "zh": "最大重试次数",
+    },
+    "corrector_desc": {
+        "en": "Automatically fix malformed model outputs",
+        "zh": "自动修复格式错误的模型输出",
+    },
+    "advanced_settings": {
+        "en": "Advanced Settings",
+        "zh": "高级设置",
+    },
+    "use_separate_model": {
+        "en": "Use Separate Model",
+        "zh": "使用独立模型",
+    },
+    "corrector_backend": {
+        "en": "Corrector Backend",
+        "zh": "校正器后端",
+    },
+    "corrector_model": {
+        "en": "Corrector Model",
+        "zh": "校正器模型",
+    },
+    "corrector_ollama_url": {
+        "en": "Corrector Ollama URL",
+        "zh": "校正器 Ollama 地址",
+    },
+    "corrector_api_base": {
+        "en": "Corrector API Base",
+        "zh": "校正器 API 地址",
+    },
+    "corrector_api_key": {
+        "en": "Corrector API Key",
+        "zh": "校正器 API 密钥",
+    },
 }
 
 

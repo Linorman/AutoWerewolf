@@ -92,6 +92,27 @@ class ModelConfig(BaseModel):
         return self
 
 
+class OutputCorrectorConfig(BaseModel):
+    enabled: bool = Field(
+        default=True,
+        description="Whether to enable output correction"
+    )
+    model_config_override: Optional[ModelConfig] = Field(
+        default=None,
+        description="Model configuration for the corrector. If None, uses the same model as the agent."
+    )
+    max_retries: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description="Maximum number of correction attempts"
+    )
+    fallback_on_failure: bool = Field(
+        default=True,
+        description="Whether to use fallback values if correction fails"
+    )
+
+
 class AgentModelConfig(BaseModel):
     default: ModelConfig = Field(
         default_factory=ModelConfig,
@@ -129,9 +150,19 @@ class AgentModelConfig(BaseModel):
         default=None,
         description="Override for village idiot agent"
     )
+    output_corrector: OutputCorrectorConfig = Field(
+        default_factory=OutputCorrectorConfig,
+        description="Configuration for output correction model"
+    )
 
     def get_config_for_role(self, role: str) -> ModelConfig:
         role_config = getattr(self, role.lower(), None)
         if role_config is not None:
             return role_config
         return self.default
+    
+    def get_corrector_model_config(self) -> Optional[ModelConfig]:
+        """Get the model config for output corrector."""
+        if not self.output_corrector.enabled:
+            return None
+        return self.output_corrector.model_config_override or self.default

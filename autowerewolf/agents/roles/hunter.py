@@ -75,7 +75,12 @@ Set shoot=true and select your target. This is your final action."""),
         ])
         chain = prompt | self.chat_model.with_structured_output(HunterShootOutput)
         context = game_view.to_prompt_context()
-        result: HunterShootOutput = chain.invoke({"context": context})  # type: ignore
+        result: HunterShootOutput = self._invoke_with_correction(
+            chain,
+            {"context": context},
+            HunterShootOutput,
+            context,
+        )
         return result
 
     def _build_speech_chain(self) -> RunnableSerializable:
@@ -96,7 +101,12 @@ Deliver your day speech. Options:
     def decide_day_speech(self, game_view: GameView) -> SpeechOutput:
         context = game_view.to_prompt_context()
         can_shoot = "Yes" if self.can_shoot else "No (poisoned)"
-        return self.speech_chain.invoke({"context": context, "can_shoot": can_shoot})
+        return self._invoke_with_correction(
+            self.speech_chain,
+            {"context": context, "can_shoot": can_shoot},
+            SpeechOutput,
+            context,
+        )
 
     def _build_vote_chain(self) -> RunnableSerializable:
         prompt = ChatPromptTemplate.from_messages([
@@ -115,4 +125,9 @@ Cast your vote. Remember:
     def decide_vote(self, game_view: GameView) -> VoteOutput:
         context = game_view.to_prompt_context()
         can_shoot = "Yes" if self.can_shoot else "No (poisoned)"
-        return self.vote_chain.invoke({"context": context, "can_shoot": can_shoot})
+        return self._invoke_with_correction(
+            self.vote_chain,
+            {"context": context, "can_shoot": can_shoot},
+            VoteOutput,
+            context,
+        )

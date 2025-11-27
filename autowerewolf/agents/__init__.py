@@ -25,6 +25,11 @@ from autowerewolf.agents.memory import (
     create_werewolf_camp_memory,
 )
 from autowerewolf.agents.moderator import ModeratorChain, NarrationOutput
+from autowerewolf.agents.output_corrector import (
+    OutputCorrector,
+    CorrectedStructuredOutput,
+    create_output_corrector,
+)
 from autowerewolf.agents.player_base import (
     BasePlayerAgent,
     GameView,
@@ -89,6 +94,9 @@ __all__ = [
     "create_werewolf_camp_memory",
     "ModeratorChain",
     "NarrationOutput",
+    "OutputCorrector",
+    "CorrectedStructuredOutput",
+    "create_output_corrector",
     "BasePlayerAgent",
     "GameView",
     "VillagerAgent",

@@ -92,11 +92,16 @@ Remember: Only ONE potion can be used per night."""),
         context = game_view.to_prompt_context()
         potion_status = self.get_potion_status()
         attack_info = attack_target if attack_target else "No one was attacked"
-        return self.night_chain.invoke({
-            "context": context,
-            "potion_status": potion_status,
-            "attack_target": attack_info,
-        })
+        return self._invoke_with_correction(
+            self.night_chain,
+            {
+                "context": context,
+                "potion_status": potion_status,
+                "attack_target": attack_info,
+            },
+            WitchNightOutput,
+            context,
+        )
 
     def validate_action(self, action: WitchNightOutput) -> WitchNightOutput:
         if action.use_cure and not self.has_cure:
@@ -127,7 +132,12 @@ Deliver your day speech. Consider:
     def decide_day_speech(self, game_view: GameView) -> SpeechOutput:
         context = game_view.to_prompt_context()
         potion_status = self.get_potion_status()
-        return self.speech_chain.invoke({"context": context, "potion_status": potion_status})
+        return self._invoke_with_correction(
+            self.speech_chain,
+            {"context": context, "potion_status": potion_status},
+            SpeechOutput,
+            context,
+        )
 
     def _build_vote_chain(self) -> RunnableSerializable:
         prompt = ChatPromptTemplate.from_messages([
@@ -146,4 +156,9 @@ Cast your vote. Consider:
     def decide_vote(self, game_view: GameView) -> VoteOutput:
         context = game_view.to_prompt_context()
         potion_status = self.get_potion_status()
-        return self.vote_chain.invoke({"context": context, "potion_status": potion_status})
+        return self._invoke_with_correction(
+            self.vote_chain,
+            {"context": context, "potion_status": potion_status},
+            VoteOutput,
+            context,
+        )

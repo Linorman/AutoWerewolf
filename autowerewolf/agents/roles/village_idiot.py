@@ -86,7 +86,12 @@ Decide whether to reveal your identity."""),
         ])
         chain = prompt | self.chat_model.with_structured_output(VillageIdiotRevealDecision)
         context = game_view.to_prompt_context()
-        result: VillageIdiotRevealDecision = chain.invoke({"context": context})  # type: ignore
+        result: VillageIdiotRevealDecision = self._invoke_with_correction(
+            chain,
+            {"context": context},
+            VillageIdiotRevealDecision,
+            context,
+        )
         return result
 
     def _build_speech_chain(self) -> RunnableSerializable:

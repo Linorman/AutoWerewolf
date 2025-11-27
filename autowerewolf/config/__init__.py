@@ -12,6 +12,7 @@ from autowerewolf.config.models import (
     AgentModelConfig,
     ModelBackend,
     ModelConfig,
+    OutputCorrectorConfig,
 )
 from autowerewolf.config.performance import (
     MODEL_PROFILES,
@@ -26,6 +27,7 @@ __all__ = [
     "AgentModelConfig",
     "ModelBackend",
     "ModelConfig",
+    "OutputCorrectorConfig",
     "MODEL_PROFILES",
     "PERFORMANCE_PRESETS",
     "PerformanceConfig",

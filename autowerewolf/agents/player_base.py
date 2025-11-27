@@ -24,6 +24,7 @@ from autowerewolf.engine.roles import Role
 
 if TYPE_CHECKING:
     from autowerewolf.agents.memory import AgentMemory
+    from autowerewolf.agents.output_corrector import OutputCorrector
 
 
 class GameView:
@@ -91,6 +92,7 @@ class BasePlayerAgent(ABC):
         chat_model: BaseChatModel,
         memory: Optional["AgentMemory"] = None,
         verbosity: VerbosityLevel = VerbosityLevel.STANDARD,
+        output_corrector: Optional["OutputCorrector"] = None,
     ):
         self.player_id = player_id
         self.player_name = player_name
@@ -98,6 +100,7 @@ class BasePlayerAgent(ABC):
         self.chat_model = chat_model
         self.memory = memory
         self.verbosity = verbosity
+        self.output_corrector = output_corrector
         self._night_chain: Optional[RunnableSerializable] = None
         self._speech_chain: Optional[RunnableSerializable] = None
         self._vote_chain: Optional[RunnableSerializable] = None
@@ -208,17 +211,73 @@ class BasePlayerAgent(ABC):
             context = f"{context}\n\nYour memory:\n{memory_context}"
         return context
 
+    def _invoke_with_correction(
+        self,
+        chain: RunnableSerializable,
+        input_data: dict[str, Any],
+        schema_class: type,
+        context: str,
+    ) -> Any:
+        from pydantic import ValidationError
+        
+        try:
+            return chain.invoke(input_data)
+        except ValidationError as e:
+            if self.output_corrector and self.output_corrector.enabled:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Output validation failed for {schema_class.__name__}, attempting correction")
+                
+                raw_content = self._extract_raw_input_from_error(e)
+                
+                corrected = self.output_corrector.correct_output(
+                    original_output=raw_content,
+                    schema_class=schema_class,
+                    validation_error=e,
+                    context=context,
+                )
+                
+                if corrected is not None:
+                    return corrected
+            
+            raise
+    
+    def _extract_raw_input_from_error(self, error: Any) -> Any:
+        errors = error.errors()
+        if errors:
+            first_error = errors[0]
+            if 'input' in first_error:
+                return first_error['input']
+        
+        return str(error)
+
     def decide_night_action(self, game_view: GameView) -> NightActionOutput:
         context = self._build_context_with_memory(game_view)
-        return self.night_chain.invoke({"context": context})
+        schema = self._get_night_action_schema()
+        return self._invoke_with_correction(
+            self.night_chain,
+            {"context": context},
+            schema,
+            context,
+        )
 
     def decide_day_speech(self, game_view: GameView) -> SpeechOutput:
         context = self._build_context_with_memory(game_view)
-        return self.speech_chain.invoke({"context": context})
+        return self._invoke_with_correction(
+            self.speech_chain,
+            {"context": context},
+            SpeechOutput,
+            context,
+        )
 
     def decide_vote(self, game_view: GameView) -> VoteOutput:
         context = self._build_context_with_memory(game_view)
-        return self.vote_chain.invoke({"context": context})
+        return self._invoke_with_correction(
+            self.vote_chain,
+            {"context": context},
+            VoteOutput,
+            context,
+        )
 
     def decide_sheriff_run(self, game_view: GameView) -> SheriffDecisionOutput:
         human_template = get_prompt(PromptKey.SHERIFF_RUN, self.verbosity)
@@ -228,8 +287,12 @@ class BasePlayerAgent(ABC):
         ])
         chain = prompt | self.chat_model.with_structured_output(SheriffDecisionOutput)
         context = self._build_context_with_memory(game_view)
-        result = chain.invoke({"context": context})
-        return result  # type: ignore
+        return self._invoke_with_correction(
+            chain,
+            {"context": context},
+            SheriffDecisionOutput,
+            context,
+        )
 
     def decide_badge_pass(self, game_view: GameView) -> BadgeDecisionOutput:
         human_template = get_prompt(PromptKey.BADGE_PASS, self.verbosity)
@@ -239,8 +302,12 @@ class BasePlayerAgent(ABC):
         ])
         chain = prompt | self.chat_model.with_structured_output(BadgeDecisionOutput)
         context = self._build_context_with_memory(game_view)
-        result = chain.invoke({"context": context})
-        return result  # type: ignore
+        return self._invoke_with_correction(
+            chain,
+            {"context": context},
+            BadgeDecisionOutput,
+            context,
+        )
 
     def _build_last_words_chain(self) -> RunnableSerializable:
         human_template = get_prompt(PromptKey.LAST_WORDS, self.verbosity)
@@ -258,7 +325,12 @@ class BasePlayerAgent(ABC):
 
     def decide_last_words(self, game_view: GameView) -> LastWordsOutput:
         context = self._build_context_with_memory(game_view)
-        return self.last_words_chain.invoke({"context": context})
+        return self._invoke_with_correction(
+            self.last_words_chain,
+            {"context": context},
+            LastWordsOutput,
+            context,
+        )
 
 
 def create_player_agent(
@@ -268,10 +340,20 @@ def create_player_agent(
     chat_model: BaseChatModel,
     memory: Optional[Any] = None,
     verbosity: VerbosityLevel = VerbosityLevel.STANDARD,
+    output_corrector: Optional["OutputCorrector"] = None,
 ) -> BasePlayerAgent:
     """Create a player agent for the given role.
     
     This function uses lazy imports to avoid circular import issues.
+    
+    Args:
+        player_id: Unique identifier for the player
+        player_name: Display name for the player
+        role: The role assigned to this player
+        chat_model: The LLM model for agent decisions
+        memory: Optional memory manager for the agent
+        verbosity: Verbosity level for prompts
+        output_corrector: Optional output corrector for fixing malformed outputs
     """
     # Lazy import to avoid circular imports
     from autowerewolf.agents.roles import ROLE_AGENT_MAP, VillagerAgent
@@ -284,4 +366,5 @@ def create_player_agent(
         chat_model=chat_model,
         memory=memory,
         verbosity=verbosity,
+        output_corrector=output_corrector,
     )

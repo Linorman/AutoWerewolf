@@ -13,6 +13,7 @@ from autowerewolf.agents.backend import get_chat_model
 from autowerewolf.agents.batch import BatchExecutor, create_batch_executor
 from autowerewolf.agents.memory import WerewolfCampMemory, create_agent_memory
 from autowerewolf.agents.moderator import ModeratorChain
+from autowerewolf.agents.output_corrector import OutputCorrector, create_output_corrector
 from autowerewolf.agents.player_base import (
     BasePlayerAgent,
     GameView,
@@ -208,6 +209,14 @@ class GameOrchestrator:
         werewolf_camp_memory.set_werewolf_ids(werewolf_ids)
         self._werewolf_camp_memory = werewolf_camp_memory
         
+        # Create output corrector if configured
+        output_corrector: OutputCorrector | None = None
+        corrector_config = self.agent_models.output_corrector
+        if corrector_config.enabled:
+            corrector_model_config = self.agent_models.get_corrector_model_config()
+            output_corrector = create_output_corrector(corrector_config, corrector_model_config)
+            logger.info(f"Output corrector enabled with max_retries={corrector_config.max_retries}")
+        
         for player in game_state.players:
             chat_model = self._get_model_for_role(player.role)
             memory = create_agent_memory(player.id, memory_type)
@@ -223,6 +232,7 @@ class GameOrchestrator:
                 chat_model=chat_model,
                 memory=memory,
                 verbosity=verbosity,
+                output_corrector=output_corrector,
             )
             agents[player.id] = agent
         return agents

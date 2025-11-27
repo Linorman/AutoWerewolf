@@ -10,7 +10,7 @@ from autowerewolf.config.game_rules import (
     load_game_config,
     save_default_config,
 )
-from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig
+from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig, OutputCorrectorConfig
 from autowerewolf.config.performance import (
     MODEL_PROFILES,
     PERFORMANCE_PRESETS,
@@ -99,6 +99,13 @@ def create_model_config(
     top_k: Optional[int] = None,
     repeat_penalty: Optional[float] = None,
     model_seed: Optional[int] = None,
+    enable_corrector: bool = True,
+    corrector_max_retries: int = 2,
+    corrector_backend: Optional[str] = None,
+    corrector_model: Optional[str] = None,
+    corrector_api_base: Optional[str] = None,
+    corrector_api_key: Optional[str] = None,
+    corrector_ollama_url: Optional[str] = None,
 ) -> AgentModelConfig:
     backend_enum = ModelBackend.OLLAMA if backend.lower() == "ollama" else ModelBackend.API
 
@@ -116,7 +123,27 @@ def create_model_config(
         seed=model_seed,
     )
 
-    return AgentModelConfig(default=default_config)
+    corrector_override = None
+    if corrector_backend or corrector_model:
+        cb = corrector_backend or backend
+        corrector_backend_enum = ModelBackend.OLLAMA if cb.lower() == "ollama" else ModelBackend.API
+        corrector_override = ModelConfig(
+            backend=corrector_backend_enum,
+            model_name=corrector_model or model_name,
+            api_base=corrector_api_base or api_base,
+            api_key=corrector_api_key or api_key,
+            ollama_base_url=corrector_ollama_url or ollama_base_url,
+            temperature=0.3,
+            max_tokens=512,
+        )
+
+    output_corrector = OutputCorrectorConfig(
+        enabled=enable_corrector,
+        max_retries=corrector_max_retries,
+        model_config_override=corrector_override,
+    )
+
+    return AgentModelConfig(default=default_config, output_corrector=output_corrector)
 
 
 def print_game_result(result: GameResult) -> None:
@@ -259,6 +286,43 @@ def run_game(
         "--batch",
         help="Enable parallel batching of agent calls",
     ),
+    enable_corrector: bool = typer.Option(
+        True,
+        "--corrector/--no-corrector",
+        help="Enable output corrector to fix malformed model outputs",
+    ),
+    corrector_retries: int = typer.Option(
+        2,
+        "--corrector-retries",
+        help="Maximum correction attempts (1-5)",
+        min=1,
+        max=5,
+    ),
+    corrector_backend: Optional[str] = typer.Option(
+        None,
+        "--corrector-backend",
+        help="Corrector model backend (if different from main model)",
+    ),
+    corrector_model: Optional[str] = typer.Option(
+        None,
+        "--corrector-model",
+        help="Corrector model name (if different from main model)",
+    ),
+    corrector_api_base: Optional[str] = typer.Option(
+        None,
+        "--corrector-api-base",
+        help="Corrector API base URL",
+    ),
+    corrector_api_key: Optional[str] = typer.Option(
+        None,
+        "--corrector-api-key",
+        help="Corrector API key",
+    ),
+    corrector_ollama_url: Optional[str] = typer.Option(
+        None,
+        "--corrector-ollama-url",
+        help="Corrector Ollama endpoint URL",
+    ),
 ) -> None:
     """Run a single Werewolf game with LLM agents."""
     if verbose:
@@ -290,6 +354,13 @@ def run_game(
             top_k=top_k,
             repeat_penalty=repeat_penalty,
             model_seed=model_seed,
+            enable_corrector=enable_corrector,
+            corrector_max_retries=corrector_retries,
+            corrector_backend=corrector_backend,
+            corrector_model=corrector_model,
+            corrector_api_base=corrector_api_base,
+            corrector_api_key=corrector_api_key,
+            corrector_ollama_url=corrector_ollama_url,
         )
 
     try:
@@ -327,6 +398,7 @@ def run_game(
     typer.echo(f"  Role Set: {game_config.role_set.value}")
     typer.echo(f"  Backend: {agent_model_config.default.backend.value}")
     typer.echo(f"  Model: {agent_model_config.default.model_name}")
+    typer.echo(f"  Output Corrector: {'Enabled' if agent_model_config.output_corrector.enabled else 'Disabled'}")
     if seed:
         typer.echo(f"  Seed: {seed}")
     typer.echo("")

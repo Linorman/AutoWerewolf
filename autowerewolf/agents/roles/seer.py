@@ -91,7 +91,12 @@ Select a player to check tonight. Consider:
     def decide_night_action(self, game_view: GameView) -> SeerNightOutput:
         context = game_view.to_prompt_context()
         check_history = self.get_check_history_str()
-        return self.night_chain.invoke({"context": context, "check_history": check_history})
+        return self._invoke_with_correction(
+            self.night_chain,
+            {"context": context, "check_history": check_history},
+            SeerNightOutput,
+            context,
+        )
 
     def decide_reveal(self, game_view: GameView) -> SeerRevealDecision:
         prompt = ChatPromptTemplate.from_messages([
@@ -110,7 +115,12 @@ Decide whether to reveal any information this turn:
         chain = prompt | self.chat_model.with_structured_output(SeerRevealDecision)
         context = game_view.to_prompt_context()
         check_history = self.get_check_history_str()
-        result: SeerRevealDecision = chain.invoke({"context": context, "check_history": check_history})  # type: ignore
+        result: SeerRevealDecision = self._invoke_with_correction(
+            chain,
+            {"context": context, "check_history": check_history},
+            SeerRevealDecision,
+            context,
+        )
         return result
 
     def _build_speech_chain(self) -> RunnableSerializable:
@@ -132,7 +142,12 @@ Deliver your day speech. Options:
     def decide_day_speech(self, game_view: GameView) -> SpeechOutput:
         context = game_view.to_prompt_context()
         check_history = self.get_check_history_str()
-        return self.speech_chain.invoke({"context": context, "check_history": check_history})
+        return self._invoke_with_correction(
+            self.speech_chain,
+            {"context": context, "check_history": check_history},
+            SpeechOutput,
+            context,
+        )
 
     def _build_vote_chain(self) -> RunnableSerializable:
         prompt = ChatPromptTemplate.from_messages([
@@ -152,4 +167,9 @@ Cast your vote. Priority:
     def decide_vote(self, game_view: GameView) -> VoteOutput:
         context = game_view.to_prompt_context()
         check_history = self.get_check_history_str()
-        return self.vote_chain.invoke({"context": context, "check_history": check_history})
+        return self._invoke_with_correction(
+            self.vote_chain,
+            {"context": context, "check_history": check_history},
+            VoteOutput,
+            context,
+        )

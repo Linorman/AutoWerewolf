@@ -256,7 +256,8 @@ class WerewolfProposalOutput(BaseModel):
         if isinstance(data, dict):
             data = _extract_from_nested(
                 data, "target_player_id",
-                ["target", "proposal_target", "target_id", "kill_target", "target_player_id"]
+                ["target", "proposal_target", "target_id", "kill_target", "target_player_id",
+                 "proposed_kill", "proposed_target", "kill"]
             )
             # Accept aliases for reasoning, including 'thought' which models often use
             for alias in ["reason", "thought", "explanation", "rationale"]:

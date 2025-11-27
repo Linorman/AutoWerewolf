@@ -78,10 +78,15 @@ Choose a player to protect. Consider:
     def decide_night_action(self, game_view: GameView) -> GuardNightOutput:
         context = game_view.to_prompt_context()
         last_protected = self.last_protected if self.last_protected else "No one (first night)"
-        return self.night_chain.invoke({
-            "context": context,
-            "last_protected": last_protected,
-        })
+        return self._invoke_with_correction(
+            self.night_chain,
+            {
+                "context": context,
+                "last_protected": last_protected,
+            },
+            GuardNightOutput,
+            context,
+        )
 
     def validate_action(self, action: GuardNightOutput, alive_player_ids: list[str]) -> GuardNightOutput:
         if action.protect_target_id == self.last_protected:

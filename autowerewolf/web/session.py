@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from autowerewolf.agents.human import HumanPlayerAgent, WebInputHandler
-from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig
+from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig, OutputCorrectorConfig
 from autowerewolf.config.performance import PERFORMANCE_PRESETS
 from autowerewolf.engine.roles import Role, RoleSet, WinningTeam
 from autowerewolf.engine.state import Event, GameConfig, GameState
@@ -22,6 +22,7 @@ from autowerewolf.web.schemas import (
     PlayerViewResponse,
     WebGameConfig,
     WebModelConfig,
+    WebOutputCorrectorConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class GameSession:
         mode: GameMode,
         model_config: WebModelConfig,
         game_config: WebGameConfig,
+        output_corrector_config: WebOutputCorrectorConfig,
         player_seat: Optional[int] = None,
         player_name: Optional[str] = None,
     ):
@@ -41,6 +43,7 @@ class GameSession:
         self.mode = mode
         self.model_config = model_config
         self.game_config = game_config
+        self.output_corrector_config = output_corrector_config
         self.player_seat = player_seat
         self.player_name = player_name or "Human Player"
         self.status = "created"
@@ -68,7 +71,35 @@ class GameSession:
             temperature=self.model_config.temperature,
             max_tokens=self.model_config.max_tokens,
         )
-        return AgentModelConfig(default=default_config)
+        
+        corrector_override = None
+        if self.output_corrector_config.use_separate_model:
+            corrector_backend = ModelBackend.OLLAMA
+            if self.output_corrector_config.corrector_backend == "api":
+                corrector_backend = ModelBackend.API
+            
+            corrector_override = ModelConfig(
+                backend=corrector_backend,
+                model_name=self.output_corrector_config.corrector_model_name or self.model_config.model_name,
+                api_base=self.output_corrector_config.corrector_api_base,
+                api_key=self.output_corrector_config.corrector_api_key,
+                ollama_base_url=self.output_corrector_config.corrector_ollama_base_url,
+                temperature=0.3,
+                max_tokens=512,
+            )
+        
+        # Use corrector settings from WebModelConfig (frontend) if available
+        # Otherwise fall back to WebOutputCorrectorConfig
+        corrector_enabled = self.model_config.enable_corrector
+        corrector_retries = self.model_config.corrector_max_retries
+        
+        output_corrector = OutputCorrectorConfig(
+            enabled=corrector_enabled,
+            max_retries=corrector_retries,
+            model_config_override=corrector_override,
+        )
+        
+        return AgentModelConfig(default=default_config, output_corrector=output_corrector)
 
     def _create_game_config(self) -> GameConfig:
         role_set = RoleSet.A if self.game_config.role_set == "A" else RoleSet.B
@@ -458,6 +489,7 @@ class GameSessionManager:
             mode=request.mode,
             model_config=request.model_config_data,
             game_config=request.game_config,
+            output_corrector_config=request.output_corrector_config,
             player_seat=request.player_seat,
             player_name=request.player_name,
         )

@@ -17,6 +17,19 @@ class WebModelConfig(BaseModel):
     ollama_base_url: Optional[str] = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, gt=0)
+    enable_corrector: bool = True
+    corrector_max_retries: int = Field(default=2, ge=1, le=5)
+
+
+class WebOutputCorrectorConfig(BaseModel):
+    enabled: bool = True
+    max_retries: int = Field(default=2, ge=1, le=5)
+    use_separate_model: bool = False
+    corrector_backend: Optional[Literal["ollama", "api"]] = None
+    corrector_model_name: Optional[str] = None
+    corrector_api_base: Optional[str] = None
+    corrector_api_key: Optional[str] = None
+    corrector_ollama_base_url: Optional[str] = None
 
 
 class WebGameConfig(BaseModel):
@@ -28,6 +41,7 @@ class CreateGameRequest(BaseModel):
     mode: GameMode = GameMode.WATCH
     model_config_data: WebModelConfig = Field(default_factory=WebModelConfig)
     game_config: WebGameConfig = Field(default_factory=WebGameConfig)
+    output_corrector_config: WebOutputCorrectorConfig = Field(default_factory=WebOutputCorrectorConfig)
     player_seat: Optional[int] = Field(default=None, ge=1, le=12)
     player_name: Optional[str] = None
 
