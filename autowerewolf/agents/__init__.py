@@ -28,6 +28,9 @@ from autowerewolf.agents.moderator import ModeratorChain, NarrationOutput
 from autowerewolf.agents.player_base import (
     BasePlayerAgent,
     GameView,
+    create_player_agent,
+)
+from autowerewolf.agents.roles import (
     GuardAgent,
     HunterAgent,
     ROLE_AGENT_MAP,
@@ -36,7 +39,6 @@ from autowerewolf.agents.player_base import (
     VillagerAgent,
     WerewolfAgent,
     WitchAgent,
-    create_player_agent,
 )
 from autowerewolf.agents.prompts import (
     MINIMAL_PROMPTS,

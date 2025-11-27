@@ -3,6 +3,27 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+def _extract_from_nested(data: dict, field_name: str, aliases: list[str]) -> dict:
+    """Extract field value from nested structures like {'action': {'target': 'xxx'}}."""
+    if field_name in data:
+        return data
+    
+    for nested_key in ["action", "result", "output", "response", "decision"]:
+        if nested_key in data and isinstance(data[nested_key], dict):
+            nested = data[nested_key]
+            for alias in aliases:
+                if alias in nested:
+                    data[field_name] = nested[alias]
+                    return data
+    
+    for alias in aliases:
+        if alias in data:
+            data[field_name] = data.pop(alias)
+            return data
+    
+    return data
+
+
 class SpeechOutput(BaseModel):
     content: str = Field(description="The speech content to deliver")
 
@@ -106,10 +127,10 @@ class WerewolfNightOutput(BaseModel):
     @classmethod
     def accept_aliases(cls, data):
         if isinstance(data, dict):
-            for alias in ["target", "kill_target", "target_id", "target_player_id", "kill"]:
-                if alias in data and "kill_target_id" not in data:
-                    data["kill_target_id"] = data.pop(alias)
-                    break
+            data = _extract_from_nested(
+                data, "kill_target_id",
+                ["target", "kill_target", "target_id", "target_player_id", "kill", "kill_target_id"]
+            )
             for alias in ["explode", "self_destruct"]:
                 if alias in data and "self_explode" not in data:
                     data["self_explode"] = data.pop(alias)
@@ -124,10 +145,10 @@ class SeerNightOutput(BaseModel):
     @classmethod
     def accept_aliases(cls, data):
         if isinstance(data, dict):
-            for alias in ["target", "check_target", "target_id", "target_player_id", "check"]:
-                if alias in data and "check_target_id" not in data:
-                    data["check_target_id"] = data.pop(alias)
-                    break
+            data = _extract_from_nested(
+                data, "check_target_id",
+                ["target", "check_target", "target_id", "target_player_id", "check", "check_target_id"]
+            )
         return data
 
 
@@ -165,10 +186,10 @@ class GuardNightOutput(BaseModel):
     @classmethod
     def accept_aliases(cls, data):
         if isinstance(data, dict):
-            for alias in ["target", "protect_target", "target_id", "target_player_id", "protect"]:
-                if alias in data and "protect_target_id" not in data:
-                    data["protect_target_id"] = data.pop(alias)
-                    break
+            data = _extract_from_nested(
+                data, "protect_target_id",
+                ["target", "protect_target", "target_id", "target_player_id", "protect", "protect_target_id"]
+            )
         return data
 
 
@@ -227,18 +248,21 @@ class SheriffVoteOutput(BaseModel):
 
 class WerewolfProposalOutput(BaseModel):
     target_player_id: str = Field(description="Proposed kill target")
-    reasoning: str = Field(description="Reasoning for the proposal")
+    reasoning: str = Field(default="", description="Reasoning for the proposal")
 
     @model_validator(mode="before")
     @classmethod
     def accept_aliases(cls, data):
         if isinstance(data, dict):
-            for alias in ["target", "proposal_target", "target_id", "kill_target"]:
-                if alias in data and "target_player_id" not in data:
-                    data["target_player_id"] = data.pop(alias)
+            data = _extract_from_nested(
+                data, "target_player_id",
+                ["target", "proposal_target", "target_id", "kill_target", "target_player_id"]
+            )
+            # Accept aliases for reasoning, including 'thought' which models often use
+            for alias in ["reason", "thought", "explanation", "rationale"]:
+                if alias in data and "reasoning" not in data:
+                    data["reasoning"] = data.pop(alias)
                     break
-            if "reason" in data and "reasoning" not in data:
-                data["reasoning"] = data.pop("reason")
         return data
 
 

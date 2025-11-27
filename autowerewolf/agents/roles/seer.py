@@ -51,8 +51,9 @@ SURVIVAL TIPS:
         role: Role,
         chat_model: BaseChatModel,
         memory: Optional[Any] = None,
+        **kwargs: Any,
     ):
-        super().__init__(player_id, player_name, role, chat_model, memory)
+        super().__init__(player_id, player_name, role, chat_model, memory, **kwargs)
         self.check_history: list[tuple[str, Alignment]] = []
 
     @property

@@ -44,8 +44,9 @@ Your vote is your most powerful tool. Use it wisely."""
         role: Role,
         chat_model: BaseChatModel,
         memory: Optional[Any] = None,
+        **kwargs: Any,
     ):
-        super().__init__(player_id, player_name, role, chat_model, memory)
+        super().__init__(player_id, player_name, role, chat_model, memory, **kwargs)
 
     @property
     def role_system_prompt(self) -> str:

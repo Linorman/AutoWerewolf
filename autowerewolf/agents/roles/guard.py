@@ -45,8 +45,9 @@ COMMON MISTAKES TO AVOID:
         role: Role,
         chat_model: BaseChatModel,
         memory: Optional[Any] = None,
+        **kwargs: Any,
     ):
-        super().__init__(player_id, player_name, role, chat_model, memory)
+        super().__init__(player_id, player_name, role, chat_model, memory, **kwargs)
         self.last_protected: Optional[str] = None
 
     @property

@@ -261,45 +261,6 @@ class BasePlayerAgent(ABC):
         return self.last_words_chain.invoke({"context": context})
 
 
-class VillagerAgent(BasePlayerAgent):
-    pass
-
-
-class WerewolfAgent(BasePlayerAgent):
-    pass
-
-
-class SeerAgent(BasePlayerAgent):
-    pass
-
-
-class WitchAgent(BasePlayerAgent):
-    pass
-
-
-class HunterAgent(BasePlayerAgent):
-    pass
-
-
-class GuardAgent(BasePlayerAgent):
-    pass
-
-
-class VillageIdiotAgent(BasePlayerAgent):
-    pass
-
-
-ROLE_AGENT_MAP: dict[Role, type[BasePlayerAgent]] = {
-    Role.VILLAGER: VillagerAgent,
-    Role.WEREWOLF: WerewolfAgent,
-    Role.SEER: SeerAgent,
-    Role.WITCH: WitchAgent,
-    Role.HUNTER: HunterAgent,
-    Role.GUARD: GuardAgent,
-    Role.VILLAGE_IDIOT: VillageIdiotAgent,
-}
-
-
 def create_player_agent(
     player_id: str,
     player_name: str,
@@ -308,6 +269,13 @@ def create_player_agent(
     memory: Optional[Any] = None,
     verbosity: VerbosityLevel = VerbosityLevel.STANDARD,
 ) -> BasePlayerAgent:
+    """Create a player agent for the given role.
+    
+    This function uses lazy imports to avoid circular import issues.
+    """
+    # Lazy import to avoid circular imports
+    from autowerewolf.agents.roles import ROLE_AGENT_MAP, VillagerAgent
+    
     agent_cls = ROLE_AGENT_MAP.get(role, VillagerAgent)
     return agent_cls(
         player_id=player_id,

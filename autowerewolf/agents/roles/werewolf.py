@@ -56,8 +56,9 @@ Your fellow werewolves will be revealed to you through private_info."""
         chat_model: BaseChatModel,
         memory: Optional[Any] = None,
         werewolf_teammates: Optional[list[str]] = None,
+        **kwargs: Any,
     ):
-        super().__init__(player_id, player_name, role, chat_model, memory)
+        super().__init__(player_id, player_name, role, chat_model, memory, **kwargs)
         self.werewolf_teammates = werewolf_teammates or []
         self._self_explode_chain: Optional[RunnableSerializable] = None
 

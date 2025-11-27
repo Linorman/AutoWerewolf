@@ -45,8 +45,9 @@ SURVIVAL:
         role: Role,
         chat_model: BaseChatModel,
         memory: Optional[Any] = None,
+        **kwargs: Any,
     ):
-        super().__init__(player_id, player_name, role, chat_model, memory)
+        super().__init__(player_id, player_name, role, chat_model, memory, **kwargs)
         self.can_shoot = True
 
     @property

@@ -7,6 +7,9 @@ from langchain_core.runnables import RunnableLambda
 from autowerewolf.agents.player_base import (
     BasePlayerAgent,
     GameView,
+    create_player_agent,
+)
+from autowerewolf.agents.roles import (
     VillagerAgent,
     WerewolfAgent,
     SeerAgent,
@@ -14,7 +17,6 @@ from autowerewolf.agents.player_base import (
     HunterAgent,
     GuardAgent,
     VillageIdiotAgent,
-    create_player_agent,
 )
 from autowerewolf.agents.moderator import ModeratorChain, NarrationOutput
 from autowerewolf.agents.schemas import (
@@ -106,7 +108,7 @@ class TestVillagerAgent:
         agent = VillagerAgent("p1", "Player1", Role.VILLAGER, mock_model)
 
         assert "VILLAGER" in agent.role_system_prompt
-        assert "No special abilities" in agent.role_system_prompt
+        assert "no special abilities" in agent.role_system_prompt
 
     def test_decide_day_speech(self):
         expected = SpeechOutput(content="I think Player2 is suspicious")
@@ -135,7 +137,7 @@ class TestWerewolfAgent:
         agent = WerewolfAgent("p1", "Player1", Role.WEREWOLF, mock_model)
 
         assert "WEREWOLF" in agent.role_system_prompt
-        assert "Kill villagers" in agent.role_system_prompt
+        assert "Eliminate all villagers" in agent.role_system_prompt
 
     def test_decide_night_action(self):
         expected = WerewolfNightOutput(kill_target_id="p3", self_explode=False)
@@ -154,7 +156,7 @@ class TestSeerAgent:
         agent = SeerAgent("p1", "Player1", Role.SEER, mock_model)
 
         assert "SEER" in agent.role_system_prompt
-        assert "check one player" in agent.role_system_prompt
+        assert "check" in agent.role_system_prompt.lower()
 
     def test_decide_night_action(self):
         expected = SeerNightOutput(check_target_id="p2")
@@ -223,7 +225,7 @@ class TestVillageIdiotAgent:
         agent = VillageIdiotAgent("p1", "Player1", Role.VILLAGE_IDIOT, mock_model)
 
         assert "VILLAGE IDIOT" in agent.role_system_prompt
-        assert "lynched" in agent.role_system_prompt
+        assert "LYNCHED" in agent.role_system_prompt
 
 
 class TestCreatePlayerAgent:
