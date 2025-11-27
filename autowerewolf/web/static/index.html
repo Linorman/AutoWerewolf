@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoWerewolf</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-top">
+                <div class="language-switcher">
+                    <button class="lang-btn active" data-lang="en">EN</button>
+                    <button class="lang-btn" data-lang="zh">中文</button>
+                </div>
+            </div>
+            <h1>🐺 AutoWerewolf</h1>
+            <p class="subtitle" data-i18n="subtitle">LLM-powered Werewolf Game</p>
+        </header>
+
+        <main id="app">
+            <section id="lobby" class="view active">
+                <div class="panel">
+                    <h2 data-i18n="createNewGame">Create New Game</h2>
+                    <form id="create-game-form">
+                        <div class="form-group">
+                            <label for="game-mode" data-i18n="gameMode">Game Mode</label>
+                            <select id="game-mode">
+                                <option value="play" data-i18n="playWithAgents">Play with AI Agents</option>
+                                <option value="watch" data-i18n="watchAgents">Watch AI Agents Play</option>
+                            </select>
+                            <p class="form-hint" id="mode-hint" data-i18n="playModeHint">You will join the game as a player alongside AI agents.</p>
+                        </div>
+                        <div class="form-group" id="human-seats-group">
+                            <label for="human-seat" data-i18n="selectSeat">Select Your Seat (Optional)</label>
+                            <select id="human-seat">
+                                <option value="" data-i18n="randomSeat">Random Seat</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="role-set" data-i18n="roleSet">Role Set</label>
+                            <select id="role-set">
+                                <option value="A" data-i18n="setAGuard">Set A (with Guard)</option>
+                                <option value="B" data-i18n="setBVillageIdiot">Set B (with Village Idiot)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="model-name" data-i18n="model">Model</label>
+                            <input type="text" id="model-name" value="llama3" placeholder="llama3">
+                        </div>
+                        <div class="form-group">
+                            <label for="backend" data-i18n="backend">Backend</label>
+                            <select id="backend">
+                                <option value="ollama" data-i18n="ollamaLocal">Ollama (Local)</option>
+                                <option value="api" data-i18n="api">API</option>
+                            </select>
+                        </div>
+                        <div class="form-group api-config" style="display: none;">
+                            <label for="api-base" data-i18n="apiBaseUrl">API Base URL</label>
+                            <input type="text" id="api-base" placeholder="https://api.openai.com/v1">
+                        </div>
+                        <div class="form-group api-config" style="display: none;">
+                            <label for="api-key" data-i18n="apiKey">API Key</label>
+                            <input type="password" id="api-key" placeholder="sk-...">
+                        </div>
+                        <button type="submit" class="btn btn-primary" data-i18n="createGame">Create Game</button>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <h2 data-i18n="activeGames">Active Games</h2>
+                    <div id="games-list" class="games-list">
+                        <p class="empty-state" data-i18n="noActiveGames">No active games</p>
+                    </div>
+                    <button id="refresh-games" class="btn btn-secondary" data-i18n="refresh">Refresh</button>
+                </div>
+            </section>
+
+            <section id="waiting-room" class="view">
+                <div class="panel">
+                    <h2 data-i18n="waitingRoom">Waiting Room</h2>
+                    <p><span data-i18n="session">Session</span>: <span id="session-id"></span></p>
+                    <p id="game-mode-display" class="mode-badge"></p>
+                    <div id="player-list" class="player-list"></div>
+                    <div class="join-form" id="join-form">
+                        <input type="text" id="player-name" placeholder="Your name" data-i18n-placeholder="yourName" maxlength="32">
+                        <button id="join-btn" class="btn btn-primary" data-i18n="joinGame">Join Game</button>
+                    </div>
+                    <button id="start-game-btn" class="btn btn-success" style="display: none;" data-i18n="startGame">Start Game</button>
+                    <button id="leave-btn" class="btn btn-secondary" data-i18n="leave">Leave</button>
+                </div>
+            </section>
+
+            <section id="game-view" class="view">
+                <div class="game-header">
+                    <div class="phase-info">
+                        <span id="day-number" data-i18n-template="dayN">Day 1</span>
+                        <span id="phase">Night</span>
+                    </div>
+                    <div class="player-role" id="player-role-info"></div>
+                </div>
+
+                <div class="game-content">
+                    <aside class="player-sidebar">
+                        <h3 data-i18n="players">Players</h3>
+                        <div id="game-players" class="player-grid"></div>
+                    </aside>
+
+                    <div class="main-area">
+                        <div class="event-log" id="event-log"></div>
+                        
+                        <div class="action-panel" id="action-panel" style="display: none;">
+                            <h3 id="action-prompt" data-i18n="selectAction">Select Action</h3>
+                            <div id="action-targets" class="action-targets"></div>
+                            <div id="action-input" class="action-input"></div>
+                            <button id="submit-action" class="btn btn-primary" data-i18n="submit">Submit</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="result-view" class="view">
+                <div class="panel result-panel">
+                    <h2 id="result-title" data-i18n="gameOver">Game Over</h2>
+                    <div id="result-content"></div>
+                    <button id="new-game-btn" class="btn btn-primary" data-i18n="newGame">New Game</button>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>AutoWerewolf v0.1.0 | <span data-i18n="poweredBy">Powered by LLM Agents</span></p>
+        </footer>
+    </div>
+
+    <div id="modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
