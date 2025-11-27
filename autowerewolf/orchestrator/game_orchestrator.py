@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NotRequired, Optional, TypedDict, cast
+from typing import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, StateGraph
@@ -122,6 +122,8 @@ class GameOrchestrator:
         enable_console_logging: bool = True,
         enable_file_logging: bool = False,
         performance_config: Optional[PerformanceConfig] = None,
+        event_callback: Optional[Callable[[Event, "GameState"], None]] = None,
+        narration_callback: Optional[Callable[[str], None]] = None,
     ):
         self.config = config
         self.agent_models = agent_models
@@ -133,6 +135,8 @@ class GameOrchestrator:
         self._graph: Optional[StateGraph] = None
         self._batch_executor: Optional[BatchExecutor] = None
         self._werewolf_camp_memory: Optional[WerewolfCampMemory] = None
+        self._event_callback = event_callback
+        self._narration_callback = narration_callback
         
         self._game_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
         self._log_level = log_level
@@ -141,6 +145,33 @@ class GameOrchestrator:
         self._enable_file_logging = enable_file_logging
         self._game_logger: Optional[GameLogger] = None
         self._game_log: Optional[GameLog] = None
+
+    def _emit_event(self, event: Event, game_state: GameState) -> None:
+        if self._event_callback:
+            try:
+                self._event_callback(event, game_state)
+            except Exception as e:
+                logger.warning(f"Event callback error: {e}")
+
+    def _emit_narration(self, narration: str) -> None:
+        if self._narration_callback:
+            try:
+                self._narration_callback(narration)
+            except Exception as e:
+                logger.warning(f"Narration callback error: {e}")
+
+    def _add_event_to_buffer(self, state: OrchestratorState, event: Event) -> None:
+        state.events_buffer.append(event)
+        self._emit_event(event, state.game_state)
+
+    def _add_events_to_buffer(self, state: OrchestratorState, events: list[Event]) -> None:
+        for event in events:
+            state.events_buffer.append(event)
+            self._emit_event(event, state.game_state)
+
+    def _add_narration(self, state: OrchestratorState, narration: str) -> None:
+        state.narration_log.append(narration)
+        self._emit_narration(narration)
 
     def _record_werewolf_discussion(
         self,
@@ -530,7 +561,7 @@ class GameOrchestrator:
 
     def _run_night_phase(self, state: OrchestratorState) -> OrchestratorState:
         narration = state.moderator.announce_night_start(state.game_state)
-        state.narration_log.append(narration)
+        self._add_narration(state, narration)
 
         actions: list[Action] = []
 
@@ -562,7 +593,7 @@ class GameOrchestrator:
 
         new_game_state, events = resolve_night_actions(state.game_state, actions)
         state.game_state = new_game_state
-        state.events_buffer.extend(events)
+        self._add_events_to_buffer(state, events)
 
         alive_after = set(p.id for p in state.game_state.get_alive_players())
         state.night_deaths = list(alive_before - alive_after)
@@ -574,7 +605,7 @@ class GameOrchestrator:
             return state
 
         narration = state.moderator.announce_sheriff_election()
-        state.narration_log.append(narration)
+        self._add_narration(state, narration)
 
         candidates = []
         for player in state.game_state.get_alive_players():
@@ -619,7 +650,7 @@ class GameOrchestrator:
             state.game_state, candidates, votes
         )
         state.game_state = new_game_state
-        state.events_buffer.extend(events)
+        self._add_events_to_buffer(state, events)
 
         return state
 
@@ -653,7 +684,7 @@ class GameOrchestrator:
                         data={"content": content},
                     )
                     state.game_state.add_event(event)
-                    state.events_buffer.append(event)
+                    self._add_event_to_buffer(state, event)
                     self._update_all_agents_memory_after_speech(state, batch_result.player_id, content)
         else:
             for player in ordered:
@@ -676,7 +707,7 @@ class GameOrchestrator:
                             data={"content": content},
                         )
                         state.game_state.add_event(event)
-                        state.events_buffer.append(event)
+                        self._add_event_to_buffer(state, event)
                         self._update_all_agents_memory_after_speech(state, player.id, content)
                 except Exception as e:
                     logger.warning(f"Speech failed for {player.id}: {e}")
@@ -686,7 +717,7 @@ class GameOrchestrator:
     def _run_day_vote(self, state: OrchestratorState) -> OrchestratorState:
         if not self.performance_config.skip_narration:
             narration = state.moderator.announce_voting_start()
-            state.narration_log.append(narration)
+            self._add_narration(state, narration)
 
         votes: dict[str, str] = {}
 
@@ -743,7 +774,7 @@ class GameOrchestrator:
 
         new_game_state, vote_result = resolve_vote(state.game_state, votes)
         state.game_state = new_game_state
-        state.events_buffer.extend(vote_result.events)
+        self._add_events_to_buffer(state, vote_result.events)
 
         self._update_all_agents_memory_after_vote(state, votes)
 
@@ -760,7 +791,7 @@ class GameOrchestrator:
 
         new_game_state, events = resolve_lynch(state.game_state, lynched_player_id)
         state.game_state = new_game_state
-        state.events_buffer.extend(events)
+        self._add_events_to_buffer(state, events)
 
         lynched = state.game_state.get_player(lynched_player_id)
 
@@ -816,7 +847,7 @@ class GameOrchestrator:
                     data={"content": content, "is_last_words": True},
                 )
                 state.game_state.add_event(event)
-                state.events_buffer.append(event)
+                self._add_event_to_buffer(state, event)
         except Exception as e:
             logger.warning(f"Last words failed for {player_id}: {e}")
 
@@ -860,7 +891,7 @@ class GameOrchestrator:
                 action = HunterShootAction(actor_id=hunter_id, target_id=target_id)
                 new_game_state, events = resolve_hunter_shot(state.game_state, action)
                 state.game_state = new_game_state
-                state.events_buffer.extend(events)
+                self._add_events_to_buffer(state, events)
 
         except Exception as e:
             logger.warning(f"Hunter shot failed: {e}")
@@ -897,7 +928,7 @@ class GameOrchestrator:
 
                 new_game_state, events = resolve_badge_action(state.game_state, action)
                 state.game_state = new_game_state
-                state.events_buffer.extend(events)
+                self._add_events_to_buffer(state, events)
 
         except Exception as e:
             logger.warning(f"Badge decision failed: {e}")
@@ -918,7 +949,7 @@ class GameOrchestrator:
 
         deaths = state.night_deaths
         narration = state.moderator.announce_day_start(state.game_state, deaths)
-        state.narration_log.append(narration)
+        self._add_narration(state, narration)
 
         death_events = []
         for death_id in deaths:
@@ -928,7 +959,7 @@ class GameOrchestrator:
                 target_id=death_id,
             )
             state.game_state.add_event(event)
-            state.events_buffer.append(event)
+            self._add_event_to_buffer(state, event)
             death_events.append(event)
 
             if state.game_state.day_number == 1 and state.game_state.config.rule_variants.first_night_death_has_last_words:
@@ -985,22 +1016,26 @@ class GameOrchestrator:
         def night_node(state: GraphState) -> GraphState:
             orch_state = dict_to_orchestrator_state(state)
             orch_state = self._run_night_phase(orch_state)
+            self._game_state = orch_state.game_state
             return cast(GraphState, orchestrator_state_to_dict(orch_state))
 
         def day_node(state: GraphState) -> GraphState:
             orch_state = dict_to_orchestrator_state(state)
             orch_state = self._run_day_phase(orch_state)
+            self._game_state = orch_state.game_state
             return cast(GraphState, orchestrator_state_to_dict(orch_state))
 
         def transition_to_night_node(state: GraphState) -> GraphState:
             orch_state = dict_to_orchestrator_state(state)
             orch_state.game_state = advance_to_night(orch_state.game_state)
             orch_state.night_deaths = []
+            self._game_state = orch_state.game_state
             return cast(GraphState, orchestrator_state_to_dict(orch_state))
 
         def check_win_node(state: GraphState) -> GraphState:
             orch_state = dict_to_orchestrator_state(state)
             orch_state.game_state = update_win_condition(orch_state.game_state)
+            self._game_state = orch_state.game_state
             return cast(GraphState, orchestrator_state_to_dict(orch_state))
 
         graph.add_node("night", night_node)
@@ -1177,7 +1212,7 @@ class GameOrchestrator:
 
         if not self.performance_config.skip_narration:
             narration = self._moderator.announce_game_end(final_state.game_state)
-            final_state.narration_log.append(narration)
+            self._add_narration(final_state, narration)
         
         self._finalize_game_log(final_state.game_state, final_state.narration_log)
 
