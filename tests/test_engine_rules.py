@@ -614,6 +614,31 @@ class TestHunterMechanics:
         assert not hunter.is_alive
         assert not hunter.hunter_can_shoot  # Cannot shoot because poisoned
     
+    def test_hunter_can_shoot_if_poisoned_when_rule_enabled(self):
+        """Test Hunter can shoot if poisoned when rule variant is enabled."""
+        config = GameConfig(
+            random_seed=42,
+            rule_variants=RuleVariants(hunter_can_shoot_if_poisoned=True)
+        )
+        roles = [Role.WEREWOLF] * 4 + [Role.VILLAGER] * 4 + [
+            Role.SEER, Role.WITCH, Role.HUNTER, Role.GUARD
+        ]
+        state = create_test_game_state(roles, config)
+        
+        hunter = state.get_players_by_role(Role.HUNTER)[0]
+        witch_id = state.get_players_by_role(Role.WITCH)[0].id
+        
+        actions = [
+            WitchPoisonAction(actor_id=witch_id, target_id=hunter.id),
+        ]
+        
+        new_state, events = resolve_night_actions(state, actions)
+        
+        hunter = new_state.get_player(hunter.id)
+        assert hunter is not None
+        assert not hunter.is_alive
+        assert hunter.hunter_can_shoot  # Can shoot because rule is enabled
+    
     def test_hunter_cannot_shoot_if_flag_false(self):
         """Test Hunter shot does nothing if hunter_can_shoot is False."""
         roles = [Role.WEREWOLF] * 4 + [Role.VILLAGER] * 4 + [

@@ -142,11 +142,6 @@ class GameConfig(BaseModel):
         return v
 
 
-# =============================================================================
-# Event Models
-# =============================================================================
-
-
 class EventType(str, Enum):
     """Types of events that can occur in the game."""
     
@@ -455,10 +450,6 @@ class TearBadgeAction(Action):
     
     action_type: Literal[ActionType.TEAR_BADGE] = ActionType.TEAR_BADGE
 
-
-# =============================================================================
-# Game State
-# =============================================================================
 
 
 class NightResolution(BaseModel):

@@ -302,10 +302,12 @@ def resolve_night_actions(
                     target.is_sheriff = False
                     new_state.sheriff_id = None
                 
-                # Check if target is hunter - mark cannot shoot if poisoned too
+                # Check if target is hunter
                 if target.role == Role.HUNTER:
+                    # If also poisoned, check poisoned rule; otherwise check night_killed rule
                     if witch_poisoned_target == wolf_target_id:
-                        target.hunter_can_shoot = False
+                        if not state.config.rule_variants.hunter_can_shoot_if_poisoned:
+                            target.hunter_can_shoot = False
                     elif not state.config.rule_variants.hunter_can_shoot_if_night_killed:
                         target.hunter_can_shoot = False
     
@@ -316,9 +318,10 @@ def resolve_night_actions(
             target.is_alive = False
             dead_player_ids.append(witch_poisoned_target)
             
-            # Hunter cannot shoot if poisoned
+            # Hunter can only shoot if poisoned when rule allows it
             if target.role == Role.HUNTER:
-                target.hunter_can_shoot = False
+                if not state.config.rule_variants.hunter_can_shoot_if_poisoned:
+                    target.hunter_can_shoot = False
             
             # Handle sheriff death from poison
             if target.is_sheriff:

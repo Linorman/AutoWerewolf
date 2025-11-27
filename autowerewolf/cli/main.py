@@ -5,6 +5,11 @@ from typing import Optional
 
 import typer
 
+from autowerewolf.config.game_rules import (
+    get_config_template,
+    load_game_config,
+    save_default_config,
+)
 from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig
 from autowerewolf.config.performance import (
     MODEL_PROFILES,
@@ -46,13 +51,40 @@ logger = logging.getLogger(__name__)
 def create_game_config(
     role_set: str = "A",
     seed: Optional[int] = None,
+    config_path: Optional[Path] = None,
 ) -> GameConfig:
-    rs = RoleSet.A if role_set.upper() == "A" else RoleSet.B
-    return GameConfig(
-        role_set=rs,
-        random_seed=seed,
-        rule_variants=RuleVariants(),
-    )
+    """Create game configuration from file or defaults.
+    
+    Args:
+        role_set: Role set override ("A" or "B")
+        seed: Random seed override
+        config_path: Path to configuration file
+        
+    Returns:
+        GameConfig instance
+    """
+    if config_path and config_path.exists():
+        game_config = load_game_config(config_path)
+    else:
+        game_config = load_game_config()
+    
+    if role_set:
+        rs = RoleSet.A if role_set.upper() == "A" else RoleSet.B
+        game_config = GameConfig(
+            num_players=game_config.num_players,
+            role_set=rs,
+            rule_variants=game_config.rule_variants,
+            random_seed=seed if seed is not None else game_config.random_seed,
+        )
+    elif seed is not None:
+        game_config = GameConfig(
+            num_players=game_config.num_players,
+            role_set=game_config.role_set,
+            rule_variants=game_config.rule_variants,
+            random_seed=seed,
+        )
+    
+    return game_config
 
 
 def create_model_config(
@@ -116,7 +148,7 @@ def run_game(
         None,
         "--config",
         "-c",
-        help="Path to game configuration file (YAML/JSON)",
+        help="Path to game rules configuration file (YAML/JSON)",
     ),
     model_config_path: Optional[Path] = typer.Option(
         None,
@@ -234,7 +266,7 @@ def run_game(
 
     typer.echo("AutoWerewolf - Starting game...\n")
 
-    game_config = create_game_config(role_set=role_set, seed=seed)
+    game_config = create_game_config(role_set=role_set, seed=seed, config_path=config)
 
     if profile:
         try:
@@ -596,6 +628,55 @@ def serve(
     typer.echo(f"=" * 50)
     typer.echo("Press Ctrl+C to stop\n")
     run_server(host=host, port=port)
+
+
+@app.command(name="init-config")
+def init_config(
+    output: Path = typer.Option(
+        Path("autowerewolf_config.yaml"),
+        "--output",
+        "-o",
+        help="Output path for the configuration file",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing configuration file",
+    ),
+    template: bool = typer.Option(
+        False,
+        "--template",
+        "-t",
+        help="Generate template with comments (recommended for first-time setup)",
+    ),
+) -> None:
+    """Generate a default game rules configuration file.
+    
+    This creates a YAML configuration file with all default rule variants.
+    You can customize the rules by editing this file and passing it to
+    run-game with the --config option.
+    """
+    if output.exists() and not force:
+        typer.echo(f"Error: File already exists: {output}", err=True)
+        typer.echo("Use --force to overwrite.", err=True)
+        raise typer.Exit(code=1)
+    
+    try:
+        if template:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(get_config_template())
+        else:
+            save_default_config(output)
+        
+        typer.echo(f"Configuration file created: {output}")
+        typer.echo("\nYou can now customize the rules and run a game with:")
+        typer.echo(f"  autowerewolf run-game --config {output}")
+        
+    except Exception as e:
+        typer.echo(f"Error creating configuration file: {e}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
