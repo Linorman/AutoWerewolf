@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoWerewolf</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">
+                <svg viewBox="0 0 100 100" fill="currentColor">
+                    <path d="M50 10c-22 0-40 18-40 40 0 15 8 28 20 35v-15c-5-5-8-12-8-20 0-15.5 12.5-28 28-28s28 12.5 28 28c0 8-3 15-8 20v15c12-7 20-20 20-35 0-22-18-40-40-40z"/>
+                    <circle cx="35" cy="45" r="5"/>
+                    <circle cx="65" cy="45" r="5"/>
+                    <path d="M35 65c0 0 7 10 15 10s15-10 15-10" stroke="currentColor" stroke-width="3" fill="none"/>
+                </svg>
+                <span>AutoWerewolf</span>
+            </div>
+            <div class="header-controls">
+                <select id="language-select" class="select-control">
+                    <option value="en" data-i18n="english">English</option>
+                    <option value="zh" data-i18n="chinese">中文</option>
+                </select>
+                <div class="connection-indicator" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text" data-i18n="disconnected">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-layout">
+            <aside class="sidebar config-sidebar">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2 data-i18n="game_config">Game Configuration</h2>
+                    </div>
+                    <div class="panel-body">
+                        <div class="mode-selector">
+                            <button class="mode-btn active" data-mode="watch">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <span data-i18n="watch_mode">Watch Mode</span>
+                            </button>
+                            <button class="mode-btn" data-mode="play">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="9" cy="7" r="4"/>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                </svg>
+                                <span data-i18n="play_mode">Play Mode</span>
+                            </button>
+                        </div>
+
+                        <div class="config-section">
+                            <h3 data-i18n="model_config">Model Settings</h3>
+                            <div class="form-group">
+                                <label data-i18n="backend">Backend</label>
+                                <select id="backend-select" class="select-control">
+                                    <option value="ollama">Ollama</option>
+                                    <option value="api">API</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="model_name">Model Name</label>
+                                <input type="text" id="model-name" class="input-control" value="llama3">
+                            </div>
+                            <div class="form-group" id="ollama-url-group">
+                                <label data-i18n="ollama_url">Ollama URL</label>
+                                <input type="text" id="ollama-url" class="input-control" placeholder="http://localhost:11434">
+                            </div>
+                            <div class="form-group hidden" id="api-base-group">
+                                <label data-i18n="api_base">API Base URL</label>
+                                <input type="text" id="api-base" class="input-control" placeholder="https://api.openai.com/v1">
+                            </div>
+                            <div class="form-group hidden" id="api-key-group">
+                                <label data-i18n="api_key">API Key</label>
+                                <input type="password" id="api-key" class="input-control">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label data-i18n="temperature">Temperature</label>
+                                    <input type="number" id="temperature" class="input-control" value="0.7" min="0" max="2" step="0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="max_tokens">Max Tokens</label>
+                                    <input type="number" id="max-tokens" class="input-control" value="1024" min="100" max="4096">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-section">
+                            <h3 data-i18n="output_corrector">Output Corrector</h3>
+                            <p class="config-hint" data-i18n="corrector_desc">Automatically fix malformed model outputs</p>
+                            <div class="form-group checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enable-corrector" checked>
+                                    <span data-i18n="enable_corrector">Enable Corrector</span>
+                                </label>
+                            </div>
+                            <div id="corrector-options">
+                                <div class="form-group">
+                                    <label data-i18n="corrector_retries">Max Retries</label>
+                                    <input type="number" id="corrector-retries" class="input-control" value="2" min="1" max="5">
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="use-separate-model">
+                                        <span data-i18n="use_separate_model">Use Separate Model</span>
+                                    </label>
+                                </div>
+                                <div id="corrector-model-config" class="hidden nested-config">
+                                    <div class="form-group">
+                                        <label data-i18n="corrector_backend">Corrector Backend</label>
+                                        <select id="corrector-backend" class="select-control">
+                                            <option value="ollama">Ollama</option>
+                                            <option value="api">API</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label data-i18n="corrector_model">Corrector Model</label>
+                                        <input type="text" id="corrector-model" class="input-control" placeholder="">
+                                    </div>
+                                    <div class="form-group" id="corrector-ollama-url-group">
+                                        <label data-i18n="corrector_ollama_url">Corrector Ollama URL</label>
+                                        <input type="text" id="corrector-ollama-url" class="input-control" placeholder="http://localhost:11434">
+                                    </div>
+                                    <div class="form-group hidden" id="corrector-api-base-group">
+                                        <label data-i18n="corrector_api_base">Corrector API Base</label>
+                                        <input type="text" id="corrector-api-base" class="input-control" placeholder="https://api.openai.com/v1">
+                                    </div>
+                                    <div class="form-group hidden" id="corrector-api-key-group">
+                                        <label data-i18n="corrector_api_key">Corrector API Key</label>
+                                        <input type="password" id="corrector-api-key" class="input-control">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-section">
+                            <h3 data-i18n="game_rules">Game Rules</h3>
+                            <div class="form-group">
+                                <label data-i18n="role_set">Role Set</label>
+                                <select id="role-set" class="select-control">
+                                    <option value="A" data-i18n="role_set_a">Set A (Guard)</option>
+                                    <option value="B" data-i18n="role_set_b">Set B (Village Idiot)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label data-i18n="random_seed">Random Seed (optional)</label>
+                                <input type="number" id="random-seed" class="input-control" placeholder="">
+                            </div>
+                        </div>
+
+                        <div class="config-section hidden" id="play-config">
+                            <h3 data-i18n="player_settings">Player Settings</h3>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label data-i18n="your_seat">Your Seat</label>
+                                    <select id="player-seat" class="select-control">
+                                        <option value="1">1</option><option value="2">2</option>
+                                        <option value="3">3</option><option value="4">4</option>
+                                        <option value="5">5</option><option value="6">6</option>
+                                        <option value="7">7</option><option value="8">8</option>
+                                        <option value="9">9</option><option value="10">10</option>
+                                        <option value="11">11</option><option value="12">12</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="your_name">Your Name</label>
+                                    <input type="text" id="player-name" class="input-control" value="Human Player">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons">
+                            <button id="start-btn" class="btn btn-primary" data-i18n="start_game">Start Game</button>
+                            <button id="stop-btn" class="btn btn-danger hidden" data-i18n="stop_game">Stop Game</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="game-area">
+                <div class="game-status-bar" id="game-status-bar">
+                    <div class="status-item">
+                        <span class="status-label" data-i18n="status">Status</span>
+                        <span class="status-value" id="game-status-text" data-i18n="game_not_started">Not Started</span>
+                    </div>
+                    <div class="status-item phase-display" id="phase-display">
+                        <div class="phase-icon" id="phase-icon">
+                            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="5"/>
+                                <line x1="12" y1="1" x2="12" y2="3"/>
+                                <line x1="12" y1="21" x2="12" y2="23"/>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                                <line x1="1" y1="12" x2="3" y2="12"/>
+                                <line x1="21" y1="12" x2="23" y2="12"/>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                            </svg>
+                            <svg class="moon-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                            </svg>
+                        </div>
+                        <span class="phase-text" data-i18n="day">Day</span>
+                        <span class="day-number" id="day-number">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label" data-i18n="alive">Alive</span>
+                        <span class="status-value alive-count" id="alive-count">12</span>
+                    </div>
+                </div>
+
+                <div class="player-arena" id="player-arena">
+                    <div class="arena-placeholder" id="arena-placeholder">
+                        <svg viewBox="0 0 100 100" fill="currentColor">
+                            <path d="M50 10c-22 0-40 18-40 40 0 15 8 28 20 35v-15c-5-5-8-12-8-20 0-15.5 12.5-28 28-28s28 12.5 28 28c0 8-3 15-8 20v15c12-7 20-20 20-35 0-22-18-40-40-40z"/>
+                        </svg>
+                        <p data-i18n="no_game_running">No game running</p>
+                        <p class="hint" data-i18n="click_to_start">Click 'Start Game' to begin</p>
+                    </div>
+                    <div class="player-grid hidden" id="player-grid"></div>
+                </div>
+            </section>
+
+            <aside class="sidebar events-sidebar">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2 data-i18n="game_log">Game Progress</h2>
+                        <div class="panel-actions">
+                            <button class="icon-btn" id="auto-scroll-btn" data-i18n-title="auto_scroll" title="Auto Scroll">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="6 9 12 15 18 9"/>
+                                </svg>
+                            </button>
+                            <button class="icon-btn" id="clear-log-btn" data-i18n-title="clear_log" title="Clear Log">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="event-filters">
+                        <button class="filter-btn active" data-filter="all" data-i18n="all">All</button>
+                        <button class="filter-btn" data-filter="speech" data-i18n="speech">💬 Speech</button>
+                        <button class="filter-btn" data-filter="vote" data-i18n="vote">🗳️ Vote</button>
+                        <button class="filter-btn" data-filter="death" data-i18n="death">💀 Death</button>
+                        <button class="filter-btn" data-filter="sheriff" data-i18n="sheriff">👑 Sheriff</button>
+                        <button class="filter-btn" data-filter="narration">📢 Narration</button>
+                    </div>
+                    <div class="panel-body">
+                        <div class="event-timeline" id="event-timeline">
+                            <div class="timeline-placeholder" id="timeline-placeholder">
+                                <p data-i18n="events_appear">Events will appear here</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <div class="modal-overlay hidden" id="winner-modal">
+        <div class="winner-modal">
+            <div class="winner-content">
+                <div class="winner-icon" id="winner-icon"></div>
+                <h2 class="winner-title" id="winner-title"></h2>
+                <p class="winner-subtitle" id="winner-subtitle"></p>
+                <button class="btn btn-primary" onclick="closeWinnerModal()" data-i18n="confirm">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="action-modal hidden" id="action-modal">
+        <div class="action-modal-content">
+            <h3 class="action-title" id="action-title"></h3>
+            <div class="action-targets" id="action-targets"></div>
+            <textarea class="action-textarea hidden" id="speech-input" placeholder=""></textarea>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="skipAction()" data-i18n="skip">Skip</button>
+                <button class="btn btn-primary" onclick="submitAction()" data-i18n="submit">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/game.js"></script>
+</body>
+</html>
+
