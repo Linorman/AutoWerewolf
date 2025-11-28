@@ -163,6 +163,7 @@ class WebConfigLoader:
         self._game_config = WebGameConfig(
             role_set=data.get("role_set", "A"),
             random_seed=data.get("random_seed"),
+            language=data.get("language", "en"),
         )
     
     @property

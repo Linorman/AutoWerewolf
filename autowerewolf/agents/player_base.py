@@ -6,9 +6,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableSerializable
 
 from autowerewolf.agents.prompts import (
+    Language,
     PromptKey,
     get_base_system_prompt,
+    get_context_template,
+    get_language,
     get_prompt,
+    get_role_name,
     get_role_system_prompt,
 )
 from autowerewolf.agents.schemas import (
@@ -39,6 +43,7 @@ class GameView:
         public_history: list[dict[str, Any]],
         private_info: Optional[dict[str, Any]] = None,
         action_context: Optional[dict[str, Any]] = None,
+        language: Optional[Language | str] = None,
     ):
         self.player_id = player_id
         self.player_name = player_name
@@ -49,34 +54,61 @@ class GameView:
         self.public_history = public_history
         self.private_info = private_info or {}
         self.action_context = action_context or {}
+        self.language = language
 
-    def to_prompt_context(self) -> str:
+    def to_prompt_context(self, language: Optional[Language | str] = None) -> str:
+        """Convert game view to prompt context string.
+        
+        Args:
+            language: Language to use. If None, uses instance language or global setting.
+        
+        Returns:
+            Formatted context string
+        """
+        lang = language or self.language
+        
+        # Get localized role name
+        role_name = get_role_name(self.role, lang)
+        
         lines = [
-            f"You are Player {self.player_name} (ID: {self.player_id})",
-            f"Your role: {self.role.value}",
-            f"Current phase: {self.phase} (Day {self.day_number})",
+            get_context_template("player_intro", lang).format(
+                name=self.player_name, player_id=self.player_id
+            ),
+            get_context_template("role_info", lang).format(role=role_name),
+            get_context_template("phase_info", lang).format(
+                phase=self.phase, day=self.day_number
+            ),
             "",
-            "Alive players:",
+            get_context_template("alive_players", lang),
         ]
+        
+        sheriff_mark = get_context_template("sheriff_mark", lang)
         for p in self.alive_players:
-            sheriff_mark = " [Sheriff]" if p.get("is_sheriff") else ""
-            lines.append(f"  - {p['name']} (ID: {p['id']}, Seat: {p.get('seat_number', '?')}){sheriff_mark}")
+            mark = sheriff_mark if p.get("is_sheriff") else ""
+            lines.append(
+                get_context_template("player_entry", lang).format(
+                    name=p['name'],
+                    id=p['id'],
+                    seat=p.get('seat_number', '?'),
+                    sheriff=mark
+                )
+            )
 
         if self.private_info:
             lines.append("")
-            lines.append("Your private information:")
+            lines.append(get_context_template("private_info", lang))
             for key, value in self.private_info.items():
                 lines.append(f"  - {key}: {value}")
 
         if self.action_context:
             lines.append("")
-            lines.append("Action context:")
+            lines.append(get_context_template("action_context", lang))
             for key, value in self.action_context.items():
                 lines.append(f"  - {key}: {value}")
 
         if self.public_history:
             lines.append("")
-            lines.append("Recent public events:")
+            lines.append(get_context_template("recent_events", lang))
             for event in self.public_history[-10:]:
                 lines.append(f"  - {event.get('description', str(event))}")
 
@@ -93,6 +125,7 @@ class BasePlayerAgent(ABC):
         memory: Optional["AgentMemory"] = None,
         verbosity: VerbosityLevel = VerbosityLevel.STANDARD,
         output_corrector: Optional["OutputCorrector"] = None,
+        language: Optional[Language | str] = None,
     ):
         self.player_id = player_id
         self.player_name = player_name
@@ -101,6 +134,7 @@ class BasePlayerAgent(ABC):
         self.memory = memory
         self.verbosity = verbosity
         self.output_corrector = output_corrector
+        self.language = language
         self._night_chain: Optional[RunnableSerializable] = None
         self._speech_chain: Optional[RunnableSerializable] = None
         self._vote_chain: Optional[RunnableSerializable] = None
@@ -139,11 +173,11 @@ class BasePlayerAgent(ABC):
 
     @property
     def role_system_prompt(self) -> str:
-        return get_role_system_prompt(self.role, self.verbosity)
+        return get_role_system_prompt(self.role, self.verbosity, self.language)
 
     @property
     def base_system_prompt(self) -> str:
-        return get_base_system_prompt(self.verbosity)
+        return get_base_system_prompt(self.verbosity, self.language)
 
     def _get_night_action_schema(self) -> type:
         from autowerewolf.agents.schemas import (
@@ -163,7 +197,7 @@ class BasePlayerAgent(ABC):
 
     def _build_night_chain(self) -> RunnableSerializable:
         schema = self._get_night_action_schema()
-        human_template = get_prompt(PromptKey.NIGHT_ACTION, self.verbosity)
+        human_template = get_prompt(PromptKey.NIGHT_ACTION, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -171,7 +205,7 @@ class BasePlayerAgent(ABC):
         return prompt | self.chat_model.with_structured_output(schema)
 
     def _build_speech_chain(self) -> RunnableSerializable:
-        human_template = get_prompt(PromptKey.SPEECH, self.verbosity)
+        human_template = get_prompt(PromptKey.SPEECH, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -179,7 +213,7 @@ class BasePlayerAgent(ABC):
         return prompt | self.chat_model.with_structured_output(SpeechOutput)
 
     def _build_vote_chain(self) -> RunnableSerializable:
-        human_template = get_prompt(PromptKey.VOTE, self.verbosity)
+        human_template = get_prompt(PromptKey.VOTE, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -205,7 +239,7 @@ class BasePlayerAgent(ABC):
         return self._vote_chain
 
     def _build_context_with_memory(self, game_view: GameView) -> str:
-        context = game_view.to_prompt_context()
+        context = game_view.to_prompt_context(self.language)
         memory_context = self._get_memory_context()
         if memory_context:
             context = f"{context}\n\nYour memory:\n{memory_context}"
@@ -280,7 +314,7 @@ class BasePlayerAgent(ABC):
         )
 
     def decide_sheriff_run(self, game_view: GameView) -> SheriffDecisionOutput:
-        human_template = get_prompt(PromptKey.SHERIFF_RUN, self.verbosity)
+        human_template = get_prompt(PromptKey.SHERIFF_RUN, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -295,7 +329,7 @@ class BasePlayerAgent(ABC):
         )
 
     def decide_badge_pass(self, game_view: GameView) -> BadgeDecisionOutput:
-        human_template = get_prompt(PromptKey.BADGE_PASS, self.verbosity)
+        human_template = get_prompt(PromptKey.BADGE_PASS, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -310,7 +344,7 @@ class BasePlayerAgent(ABC):
         )
 
     def _build_last_words_chain(self) -> RunnableSerializable:
-        human_template = get_prompt(PromptKey.LAST_WORDS, self.verbosity)
+        human_template = get_prompt(PromptKey.LAST_WORDS, self.verbosity, self.language)
         prompt = ChatPromptTemplate.from_messages([
             ("system", self.base_system_prompt + "\n\n" + self.role_system_prompt),
             ("human", human_template),
@@ -341,6 +375,7 @@ def create_player_agent(
     memory: Optional[Any] = None,
     verbosity: VerbosityLevel = VerbosityLevel.STANDARD,
     output_corrector: Optional["OutputCorrector"] = None,
+    language: Optional[Language | str] = None,
 ) -> BasePlayerAgent:
     """Create a player agent for the given role.
     
@@ -354,6 +389,7 @@ def create_player_agent(
         memory: Optional memory manager for the agent
         verbosity: Verbosity level for prompts
         output_corrector: Optional output corrector for fixing malformed outputs
+        language: Language for prompts (en/zh). If None, uses global setting.
     """
     # Lazy import to avoid circular imports
     from autowerewolf.agents.roles import ROLE_AGENT_MAP, VillagerAgent
@@ -367,4 +403,5 @@ def create_player_agent(
         memory=memory,
         verbosity=verbosity,
         output_corrector=output_corrector,
+        language=language,
     )

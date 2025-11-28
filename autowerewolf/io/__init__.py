@@ -16,6 +16,7 @@ from autowerewolf.io.analysis import (
 from autowerewolf.io.logging import (
     GameLogLevel,
     GameLogger,
+    LogCategory,
     LogEntry,
     create_game_logger,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "GameLogLevel",
     "GameLogger",
     "GameStatistics",
+    "LogCategory",
     "LogEntry",
     "MultiGameAnalyzer",
     "PlayerLog",

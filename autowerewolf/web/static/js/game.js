@@ -201,6 +201,7 @@ async function startGame() {
             random_seed: document.getElementById('random-seed').value 
                 ? parseInt(document.getElementById('random-seed').value) 
                 : null,
+            language: document.getElementById('game-language').value,
         },
     };
 
@@ -690,6 +691,9 @@ async function loadDefaults() {
         if (gc) {
             const roleSet = document.getElementById('role-set');
             if (roleSet && gc.role_set) roleSet.value = gc.role_set;
+            
+            const gameLanguage = document.getElementById('game-language');
+            if (gameLanguage && gc.language) gameLanguage.value = gc.language;
             
             const randomSeed = document.getElementById('random-seed');
             if (randomSeed && gc.random_seed !== null && gc.random_seed !== undefined) {

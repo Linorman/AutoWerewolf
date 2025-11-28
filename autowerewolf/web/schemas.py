@@ -35,6 +35,7 @@ class WebOutputCorrectorConfig(BaseModel):
 class WebGameConfig(BaseModel):
     role_set: Literal["A", "B"] = "A"
     random_seed: Optional[int] = None
+    language: Literal["en", "zh"] = "en"
 
 
 class CreateGameRequest(BaseModel):

@@ -80,6 +80,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Random Seed (optional)",
         "zh": "随机种子（可选）",
     },
+    "game_language": {
+        "en": "Game Language",
+        "zh": "游戏语言",
+    },
+    "game_language_hint": {
+        "en": "Language used for AI agent prompts",
+        "zh": "用于AI代理提示词的语言",
+    },
     "player_settings": {
         "en": "Player Settings",
         "zh": "玩家设置",

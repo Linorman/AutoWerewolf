@@ -12,10 +12,20 @@ class VerbosityLevel(str, Enum):
     FULL = "full"
 
 
+class LanguageSetting(str, Enum):
+    """Language setting for prompts and game content."""
+    EN = "en"
+    ZH = "zh"
+
+
 class PerformanceConfig(BaseModel):
     verbosity: VerbosityLevel = Field(
         default=VerbosityLevel.STANDARD,
         description="Prompt and output verbosity level"
+    )
+    language: LanguageSetting = Field(
+        default=LanguageSetting.EN,
+        description="Language for prompts and game content (en=English, zh=Chinese)"
     )
     enable_batching: bool = Field(
         default=False,

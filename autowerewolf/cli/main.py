@@ -5,6 +5,7 @@ from typing import Optional
 
 import typer
 
+from autowerewolf.agents.prompts import Language, set_language
 from autowerewolf.config.game_rules import (
     get_config_template,
     load_game_config,
@@ -12,6 +13,7 @@ from autowerewolf.config.game_rules import (
 )
 from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig, OutputCorrectorConfig
 from autowerewolf.config.performance import (
+    LanguageSetting,
     MODEL_PROFILES,
     PERFORMANCE_PRESETS,
     PerformanceConfig,
@@ -46,7 +48,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
 
 def create_game_config(
     role_set: str = "A",
@@ -270,6 +271,12 @@ def run_game(
         "-l",
         help="Logging level: 'minimal', 'standard', or 'verbose'",
     ),
+    language: str = typer.Option(
+        "en",
+        "--language",
+        "--lang",
+        help="Language for prompts and game content: 'en' (English) or 'zh' (Chinese)",
+    ),
     profile: Optional[str] = typer.Option(
         None,
         "--profile",
@@ -328,6 +335,10 @@ def run_game(
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Set global language for prompts
+    lang_setting = LanguageSetting(language.lower())
+    set_language(Language(language.lower()))
+    
     typer.echo("AutoWerewolf - Starting game...\n")
 
     game_config = create_game_config(role_set=role_set, seed=seed, config_path=config)
@@ -365,16 +376,16 @@ def run_game(
 
     try:
         perf_config = get_performance_preset(performance_preset)
-        if enable_batching:
-            perf_config = PerformanceConfig(
-                verbosity=perf_config.verbosity,
-                enable_batching=True,
-                batch_size=perf_config.batch_size,
-                skip_narration=perf_config.skip_narration,
-                compact_logs=perf_config.compact_logs,
-                max_speech_length=perf_config.max_speech_length,
-                max_reasoning_length=perf_config.max_reasoning_length,
-            )
+        perf_config = PerformanceConfig(
+            verbosity=perf_config.verbosity,
+            language=lang_setting,
+            enable_batching=enable_batching or perf_config.enable_batching,
+            batch_size=perf_config.batch_size,
+            skip_narration=perf_config.skip_narration,
+            compact_logs=perf_config.compact_logs,
+            max_speech_length=perf_config.max_speech_length,
+            max_reasoning_length=perf_config.max_reasoning_length,
+        )
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
@@ -394,8 +405,10 @@ def run_game(
         performance_config=perf_config,
     )
 
+    lang_display = "Chinese" if lang_setting == LanguageSetting.ZH else "English"
     typer.echo("Initializing game...")
     typer.echo(f"  Role Set: {game_config.role_set.value}")
+    typer.echo(f"  Language: {lang_display}")
     typer.echo(f"  Backend: {agent_model_config.default.backend.value}")
     typer.echo(f"  Model: {agent_model_config.default.model_name}")
     typer.echo(f"  Output Corrector: {'Enabled' if agent_model_config.output_corrector.enabled else 'Disabled'}")
@@ -506,6 +519,12 @@ def simulate(
         "-l",
         help="Logging level: 'minimal', 'standard', or 'verbose'",
     ),
+    language: str = typer.Option(
+        "en",
+        "--language",
+        "--lang",
+        help="Language for prompts and game content: 'en' (English) or 'zh' (Chinese)",
+    ),
     profile: Optional[str] = typer.Option(
         None,
         "--profile",
@@ -519,6 +538,10 @@ def simulate(
     ),
 ) -> None:
     """Run multiple Werewolf games and collect statistics."""
+    # Set global language for prompts
+    lang_setting = LanguageSetting(language.lower())
+    set_language(Language(language.lower()))
+    
     typer.echo(f"AutoWerewolf - Simulating {num_games} games...\n")
 
     if profile:
@@ -542,7 +565,17 @@ def simulate(
             model_seed=model_seed,
         )
 
-    perf_config = get_performance_preset("simulation" if fast_mode else "standard")
+    base_perf_config = get_performance_preset("simulation" if fast_mode else "standard")
+    perf_config = PerformanceConfig(
+        verbosity=base_perf_config.verbosity,
+        language=lang_setting,
+        enable_batching=base_perf_config.enable_batching,
+        batch_size=base_perf_config.batch_size,
+        skip_narration=base_perf_config.skip_narration,
+        compact_logs=base_perf_config.compact_logs,
+        max_speech_length=base_perf_config.max_speech_length,
+        max_reasoning_length=base_perf_config.max_reasoning_length,
+    )
     game_log_level = GameLogLevel(log_level.lower())
 
     results = {

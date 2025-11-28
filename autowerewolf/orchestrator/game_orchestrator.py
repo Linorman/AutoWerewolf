@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 
 from autowerewolf.agents.backend import get_chat_model
 from autowerewolf.agents.batch import BatchExecutor, create_batch_executor
+from autowerewolf.agents.human import HumanPlayerAgent
 from autowerewolf.agents.memory import WerewolfCampMemory, create_agent_memory
 from autowerewolf.agents.moderator import ModeratorChain
 from autowerewolf.agents.output_corrector import OutputCorrector, create_output_corrector
@@ -23,9 +24,12 @@ from autowerewolf.agents.roles.werewolf import WerewolfAgent, WerewolfDiscussion
 from autowerewolf.agents.schemas import (
     BadgeDecisionOutput,
     GuardNightOutput,
+    HunterShootOutput,
+    LastWordsOutput,
     SeerNightOutput,
     SpeechOutput,
     VoteOutput,
+    WerewolfNightOutput,
     WitchNightOutput,
 )
 from autowerewolf.config.models import AgentModelConfig
@@ -102,6 +106,7 @@ class GraphState(TypedDict):
 
 @dataclass
 class OrchestratorState:
+    """State container for orchestrator during game execution."""
     game_state: GameState
     agents: dict[str, BasePlayerAgent]
     moderator: ModeratorChain
@@ -110,6 +115,33 @@ class OrchestratorState:
     night_deaths: list[str] = field(default_factory=list)
     pending_hunter_shot: Optional[str] = None
     pending_badge_decision: Optional[str] = None
+
+    def to_dict(self) -> "GraphState":
+        """Convert to GraphState dict for StateGraph."""
+        return {
+            "game_state": self.game_state,
+            "agents": self.agents,
+            "moderator": self.moderator,
+            "events_buffer": self.events_buffer,
+            "narration_log": self.narration_log,
+            "night_deaths": self.night_deaths,
+            "pending_hunter_shot": self.pending_hunter_shot,
+            "pending_badge_decision": self.pending_badge_decision,
+        }
+
+    @classmethod
+    def from_dict(cls, d: "GraphState") -> "OrchestratorState":
+        """Create OrchestratorState from GraphState dict."""
+        return cls(
+            game_state=d["game_state"],
+            agents=d["agents"],
+            moderator=d["moderator"],
+            events_buffer=d.get("events_buffer", []),
+            narration_log=d.get("narration_log", []),
+            night_deaths=d.get("night_deaths", []),
+            pending_hunter_shot=d.get("pending_hunter_shot"),
+            pending_badge_decision=d.get("pending_badge_decision"),
+        )
 
 
 class GameOrchestrator:
@@ -159,6 +191,13 @@ class GameOrchestrator:
     def is_stop_requested(self) -> bool:
         return self._stop_requested
 
+    def _truncate_content(self, content: str) -> str:
+        """Truncate content to max speech length if needed."""
+        max_len = self.performance_config.max_speech_length
+        if len(content) > max_len:
+            return content[:max_len] + "..."
+        return content
+
     def _emit_event(self, event: Event, game_state: GameState) -> None:
         if self._event_callback:
             try:
@@ -205,6 +244,7 @@ class GameOrchestrator:
     def _create_agents(self, game_state: GameState) -> dict[str, BasePlayerAgent]:
         agents = {}
         verbosity = self.performance_config.verbosity
+        language = self.performance_config.language.value  # Get language from performance config
         memory_type = self.performance_config.memory_type
         max_facts = self.performance_config.max_memory_facts
         
@@ -261,6 +301,7 @@ class GameOrchestrator:
                 memory=memory,
                 verbosity=verbosity,
                 output_corrector=output_corrector,
+                language=language,
             )
             agents[player.id] = agent
         return agents
@@ -375,40 +416,33 @@ class GameOrchestrator:
         self, game_state: GameState, player: Any
     ) -> dict[str, Any]:
         private_info: dict[str, Any] = {}
+        role = player.role
 
-        if player.role == Role.WEREWOLF:
-            wolves = game_state.get_werewolves()
-            private_info["teammates"] = [
-                {"id": w.id, "name": w.name, "is_alive": w.is_alive}
-                for w in wolves
-                if w.id != player.id
-            ]
-
-        elif player.role == Role.SEER:
-            private_info["check_results"] = [
-                {"player_id": pid, "result": alignment.value}
-                for pid, alignment in player.seer_checks
-            ]
-
-        elif player.role == Role.WITCH:
-            private_info["has_cure"] = player.witch_has_cure
-            private_info["has_poison"] = player.witch_has_poison
-            if game_state.wolf_kill_target_id:
-                target = game_state.get_player(game_state.wolf_kill_target_id)
-                if target:
-                    private_info["attack_target"] = {
-                        "id": target.id,
-                        "name": target.name,
-                    }
-
-        elif player.role == Role.GUARD:
-            private_info["last_protected"] = player.guard_last_protected
-
-        elif player.role == Role.HUNTER:
-            private_info["can_shoot"] = player.hunter_can_shoot
-
-        elif player.role == Role.VILLAGE_IDIOT:
-            private_info["revealed"] = player.village_idiot_revealed
+        match role:
+            case Role.WEREWOLF:
+                wolves = game_state.get_werewolves()
+                private_info["teammates"] = [
+                    {"id": w.id, "name": w.name, "is_alive": w.is_alive}
+                    for w in wolves if w.id != player.id
+                ]
+            case Role.SEER:
+                private_info["check_results"] = [
+                    {"player_id": pid, "result": alignment.value}
+                    for pid, alignment in player.seer_checks
+                ]
+            case Role.WITCH:
+                private_info["has_cure"] = player.witch_has_cure
+                private_info["has_poison"] = player.witch_has_poison
+                if game_state.wolf_kill_target_id:
+                    target = game_state.get_player(game_state.wolf_kill_target_id)
+                    if target:
+                        private_info["attack_target"] = {"id": target.id, "name": target.name}
+            case Role.GUARD:
+                private_info["last_protected"] = player.guard_last_protected
+            case Role.HUNTER:
+                private_info["can_shoot"] = player.hunter_can_shoot
+            case Role.VILLAGE_IDIOT:
+                private_info["revealed"] = player.village_idiot_revealed
 
         return private_info
 
@@ -425,9 +459,6 @@ class GameOrchestrator:
             include_self_knife=state.game_state.config.rule_variants.allow_wolf_self_knife,
         )
 
-        from autowerewolf.agents.human import HumanPlayerAgent
-        from autowerewolf.agents.schemas import WerewolfNightOutput
-        
         werewolf_agents: list[WerewolfAgent] = []
         human_wolf_agent: Optional[BasePlayerAgent] = None
         human_wolf_id: Optional[str] = None
@@ -655,14 +686,34 @@ class GameOrchestrator:
         return None
 
     def _run_night_phase(self, state: OrchestratorState) -> OrchestratorState:
+        alive_count = len(state.game_state.get_alive_players())
+        if self._game_logger:
+            self._game_logger.log_phase_change(
+                state.game_state.day_number, "night", alive_count
+            )
+        
         narration = state.moderator.announce_night_start(state.game_state)
         self._add_narration(state, narration)
 
         actions: list[Action] = []
 
-        guard_action = self._collect_guard_action(state)
-        if guard_action:
-            actions.append(guard_action)
+        # Helper to append non-None actions
+        def add_action(action: Optional[Action]) -> None:
+            if action:
+                actions.append(action)
+                if self._game_logger:
+                    actor = state.game_state.get_player(action.actor_id)
+                    target = state.game_state.get_player(action.target_id) if action.target_id else None
+                    self._game_logger.log_night_action(
+                        action.actor_id,
+                        actor.name if actor else action.actor_id,
+                        actor.role.value if actor else "unknown",
+                        action.action_type.value,
+                        action.target_id,
+                        target.name if target else None,
+                    )
+
+        add_action(self._collect_guard_action(state))
 
         wolf_action, wolf_discussions = self._collect_werewolf_action(state)
         if wolf_action:
@@ -670,19 +721,27 @@ class GameOrchestrator:
             new_state = deepcopy(state.game_state)
             new_state.wolf_kill_target_id = wolf_action.target_id
             state.game_state = new_state
+            
+            if self._game_logger:
+                wolves = state.game_state.get_alive_werewolves()
+                wolf_names = ", ".join(w.name for w in wolves)
+                target = state.game_state.get_player(wolf_action.target_id) if wolf_action.target_id else None
+                self._game_logger.log_night_action(
+                    wolf_action.actor_id,
+                    wolf_names,
+                    "werewolf",
+                    wolf_action.action_type.value,
+                    wolf_action.target_id,
+                    target.name if target else None,
+                )
 
         if wolf_discussions:
             self._record_werewolf_discussion(state.game_state.day_number, wolf_discussions)
 
         cure_action, poison_action = self._collect_witch_action(state)
-        if cure_action:
-            actions.append(cure_action)
-        if poison_action:
-            actions.append(poison_action)
-
-        seer_action = self._collect_seer_action(state)
-        if seer_action:
-            actions.append(seer_action)
+        add_action(cure_action)
+        add_action(poison_action)
+        add_action(self._collect_seer_action(state))
 
         alive_before = set(p.id for p in state.game_state.get_alive_players())
 
@@ -769,9 +828,10 @@ class GameOrchestrator:
             results = self._batch_executor.execute_speeches_batch(requests)
             for batch_result in results:
                 if batch_result.result and isinstance(batch_result.result, SpeechOutput):
-                    content = batch_result.result.content
-                    if len(content) > self.performance_config.max_speech_length:
-                        content = content[:self.performance_config.max_speech_length] + "..."
+                    content = self._truncate_content(batch_result.result.content)
+                    player = state.game_state.get_player(batch_result.player_id)
+                    player_name = player.name if player else batch_result.player_id
+                    
                     event = SpeechEvent(
                         day_number=state.game_state.day_number,
                         phase=Phase.DAY,
@@ -781,6 +841,14 @@ class GameOrchestrator:
                     state.game_state.add_event(event)
                     self._add_event_to_buffer(state, event)
                     self._update_all_agents_memory_after_speech(state, batch_result.player_id, content)
+                    
+                    if self._game_logger:
+                        self._game_logger.log_speech(
+                            batch_result.player_id,
+                            player_name,
+                            state.game_state.day_number,
+                            content,
+                        )
         else:
             for player in ordered:
                 agent = state.agents.get(player.id)
@@ -792,9 +860,7 @@ class GameOrchestrator:
                     result = agent.decide_day_speech(game_view)
 
                     if isinstance(result, SpeechOutput):
-                        content = result.content
-                        if len(content) > self.performance_config.max_speech_length:
-                            content = content[:self.performance_config.max_speech_length] + "..."
+                        content = self._truncate_content(result.content)
                         event = SpeechEvent(
                             day_number=state.game_state.day_number,
                             phase=Phase.DAY,
@@ -804,6 +870,14 @@ class GameOrchestrator:
                         state.game_state.add_event(event)
                         self._add_event_to_buffer(state, event)
                         self._update_all_agents_memory_after_speech(state, player.id, content)
+                        
+                        if self._game_logger:
+                            self._game_logger.log_speech(
+                                player.id,
+                                player.name,
+                                state.game_state.day_number,
+                                content,
+                            )
                 except Exception as e:
                     logger.warning(f"Speech failed for {player.id}: {e}")
 
@@ -873,6 +947,30 @@ class GameOrchestrator:
 
         self._update_all_agents_memory_after_vote(state, votes)
 
+        if self._game_logger:
+            for voter_id, target_id in votes.items():
+                voter = state.game_state.get_player(voter_id)
+                target = state.game_state.get_player(target_id)
+                self._game_logger.log_vote(
+                    voter_id,
+                    voter.name if voter else voter_id,
+                    target_id,
+                    target.name if target else target_id,
+                    state.game_state.day_number,
+                )
+            
+            lynched_name = None
+            if vote_result.lynched_player_id:
+                lynched = state.game_state.get_player(vote_result.lynched_player_id)
+                lynched_name = lynched.name if lynched else None
+            
+            self._game_logger.log_vote_result(
+                votes,
+                vote_result.vote_counts,
+                vote_result.lynched_player_id,
+                lynched_name,
+            )
+
         if vote_result.lynched_player_id:
             state = self._handle_lynch(state, vote_result.lynched_player_id)
 
@@ -894,7 +992,14 @@ class GameOrchestrator:
             return state
 
         if lynched and not lynched.is_alive:
-            # Lynched players always get last words
+            if self._game_logger:
+                self._game_logger.log_death(
+                    lynched.id,
+                    lynched.name,
+                    lynched.role.value,
+                    "lynched",
+                )
+            
             state = self._handle_last_words(state, lynched.id)
 
             if lynched.role == Role.HUNTER and lynched.hunter_can_shoot:
@@ -930,9 +1035,6 @@ class GameOrchestrator:
                 {"giving_last_words": True, "is_dying": True},
             )
             
-            from autowerewolf.agents.human import HumanPlayerAgent
-            from autowerewolf.agents.schemas import LastWordsOutput
-            
             if isinstance(agent, HumanPlayerAgent):
                 result = agent.decide_last_words(game_view)
                 content = result.content if isinstance(result, LastWordsOutput) else str(result)
@@ -941,8 +1043,7 @@ class GameOrchestrator:
                 content = result.content if isinstance(result, SpeechOutput) else str(result)
 
             if content:
-                if len(content) > self.performance_config.max_speech_length:
-                    content = content[: self.performance_config.max_speech_length] + "..."
+                content = self._truncate_content(content)
                 event = SpeechEvent(
                     day_number=state.game_state.day_number,
                     phase=Phase.DAY,
@@ -976,9 +1077,6 @@ class GameOrchestrator:
                 {"valid_targets": valid_targets, "dying": True},
             )
 
-            from autowerewolf.agents.human import HumanPlayerAgent
-            from autowerewolf.agents.schemas import HunterShootOutput
-
             result = None
             try:
                 if isinstance(agent, HumanPlayerAgent):
@@ -999,6 +1097,15 @@ class GameOrchestrator:
                 new_game_state, events = resolve_hunter_shot(state.game_state, action)
                 state.game_state = new_game_state
                 self._add_events_to_buffer(state, events)
+                
+                target = state.game_state.get_player(target_id)
+                if target and self._game_logger:
+                    self._game_logger.log_death(
+                        target_id,
+                        target.name,
+                        target.role.value,
+                        "hunter_shot",
+                    )
 
         except Exception as e:
             logger.warning(f"Hunter shot failed: {e}")
@@ -1050,6 +1157,12 @@ class GameOrchestrator:
             state.game_state.phase = Phase.GAME_OVER
             return state
 
+        alive_count = len(state.game_state.get_alive_players())
+        if self._game_logger:
+            self._game_logger.log_phase_change(
+                state.game_state.day_number, "day", alive_count
+            )
+
         if state.game_state.day_number == 1:
             state = self._run_sheriff_election(state)
 
@@ -1067,11 +1180,19 @@ class GameOrchestrator:
             state.game_state.add_event(event)
             self._add_event_to_buffer(state, event)
             death_events.append(event)
+            
+            player = state.game_state.get_player(death_id)
+            if player and self._game_logger:
+                self._game_logger.log_death(
+                    death_id,
+                    player.name,
+                    player.role.value,
+                    "night_kill",
+                )
 
             if state.game_state.day_number == 1 and state.game_state.config.rule_variants.first_night_death_has_last_words:
                 state = self._handle_last_words(state, death_id)
 
-            player = state.game_state.get_player(death_id)
             if player and player.role == Role.HUNTER and player.hunter_can_shoot:
                 state = self._handle_hunter_shot(state, death_id)
 
@@ -1093,56 +1214,32 @@ class GameOrchestrator:
         return state.game_state.is_game_over()
 
     def _build_graph(self) -> StateGraph:
-        def orchestrator_state_to_dict(state: OrchestratorState) -> dict:
-            return {
-                "game_state": state.game_state,
-                "agents": state.agents,
-                "moderator": state.moderator,
-                "events_buffer": state.events_buffer,
-                "narration_log": state.narration_log,
-                "night_deaths": state.night_deaths,
-                "pending_hunter_shot": state.pending_hunter_shot,
-                "pending_badge_decision": state.pending_badge_decision,
-            }
-
-        def dict_to_orchestrator_state(d: GraphState) -> OrchestratorState:
-            return OrchestratorState(
-                game_state=d["game_state"],
-                agents=d["agents"],
-                moderator=d["moderator"],
-                events_buffer=d.get("events_buffer", []),
-                narration_log=d.get("narration_log", []),
-                night_deaths=d.get("night_deaths", []),
-                pending_hunter_shot=d.get("pending_hunter_shot"),
-                pending_badge_decision=d.get("pending_badge_decision"),
-            )
-
         graph = StateGraph(GraphState)
 
         def night_node(state: GraphState) -> GraphState:
-            orch_state = dict_to_orchestrator_state(state)
+            orch_state = OrchestratorState.from_dict(state)
             orch_state = self._run_night_phase(orch_state)
             self._game_state = orch_state.game_state
-            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+            return cast(GraphState, orch_state.to_dict())
 
         def day_node(state: GraphState) -> GraphState:
-            orch_state = dict_to_orchestrator_state(state)
+            orch_state = OrchestratorState.from_dict(state)
             orch_state = self._run_day_phase(orch_state)
             self._game_state = orch_state.game_state
-            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+            return cast(GraphState, orch_state.to_dict())
 
         def transition_to_night_node(state: GraphState) -> GraphState:
-            orch_state = dict_to_orchestrator_state(state)
+            orch_state = OrchestratorState.from_dict(state)
             orch_state.game_state = advance_to_night(orch_state.game_state)
             orch_state.night_deaths = []
             self._game_state = orch_state.game_state
-            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+            return cast(GraphState, orch_state.to_dict())
 
         def check_win_node(state: GraphState) -> GraphState:
-            orch_state = dict_to_orchestrator_state(state)
+            orch_state = OrchestratorState.from_dict(state)
             orch_state.game_state = update_win_condition(orch_state.game_state)
             self._game_state = orch_state.game_state
-            return cast(GraphState, orchestrator_state_to_dict(orch_state))
+            return cast(GraphState, orch_state.to_dict())
 
         graph.add_node("night", night_node)
         graph.add_node("day", day_node)
@@ -1157,8 +1254,7 @@ class GameOrchestrator:
         def route_after_day(state: GraphState) -> str:
             if self._stop_requested:
                 return END
-            orch_state = dict_to_orchestrator_state(state)
-            if orch_state.game_state.is_game_over():
+            if OrchestratorState.from_dict(state).game_state.is_game_over():
                 return END
             return "transition_to_night"
 
@@ -1170,8 +1266,7 @@ class GameOrchestrator:
         def route_after_check_win(state: GraphState) -> str:
             if self._stop_requested:
                 return END
-            orch_state = dict_to_orchestrator_state(state)
-            if orch_state.game_state.is_game_over():
+            if OrchestratorState.from_dict(state).game_state.is_game_over():
                 return END
             return "night"
 
@@ -1289,35 +1384,15 @@ class GameOrchestrator:
         graph = self._build_graph()
         compiled_graph = graph.compile()
 
-        initial_dict: GraphState = {
-            "game_state": initial_state.game_state,
-            "agents": initial_state.agents,
-            "moderator": initial_state.moderator,
-            "events_buffer": initial_state.events_buffer,
-            "narration_log": initial_state.narration_log,
-            "night_deaths": initial_state.night_deaths,
-            "pending_hunter_shot": initial_state.pending_hunter_shot,
-            "pending_badge_decision": initial_state.pending_badge_decision,
-        }
-
         final_state_dict = None
         run_config = {"recursion_limit": MAX_GAME_DAYS * 5}
-        for state_dict in compiled_graph.stream(initial_dict, config=run_config):  # type: ignore[arg-type]
+        for state_dict in compiled_graph.stream(initial_state.to_dict(), config=run_config):  # type: ignore[arg-type]
             final_state_dict = state_dict
 
         if final_state_dict:
             last_key = list(final_state_dict.keys())[-1]
             final_data = final_state_dict[last_key]
-            final_state = OrchestratorState(
-                game_state=final_data["game_state"],
-                agents=final_data["agents"],
-                moderator=final_data["moderator"],
-                events_buffer=final_data.get("events_buffer", []),
-                narration_log=final_data.get("narration_log", []),
-                night_deaths=final_data.get("night_deaths", []),
-                pending_hunter_shot=final_data.get("pending_hunter_shot"),
-                pending_badge_decision=final_data.get("pending_badge_decision"),
-            )
+            final_state = OrchestratorState.from_dict(final_data)
             
             for event in final_data.get("events_buffer", []):
                 self._log_event(event, final_state.game_state)

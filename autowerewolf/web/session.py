@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from autowerewolf.agents.human import HumanPlayerAgent, WebInputHandler
+from autowerewolf.agents.prompts import Language, set_language
 from autowerewolf.config.models import AgentModelConfig, ModelBackend, ModelConfig, OutputCorrectorConfig
-from autowerewolf.config.performance import PERFORMANCE_PRESETS
+from autowerewolf.config.performance import LanguageSetting, PerformanceConfig, PERFORMANCE_PRESETS
 from autowerewolf.engine.roles import Role, RoleSet, WinningTeam
 from autowerewolf.engine.state import Event, GameConfig, GameState
 from autowerewolf.io.persistence import save_game_log
@@ -215,7 +216,22 @@ class GameSession:
         try:
             agent_model_config = self._create_model_config()
             game_config = self._create_game_config()
-            perf_config = PERFORMANCE_PRESETS["standard"]
+            
+            lang = self.game_config.language
+            set_language(Language(lang))
+            lang_setting = LanguageSetting(lang)
+            
+            base_perf = PERFORMANCE_PRESETS["standard"]
+            perf_config = PerformanceConfig(
+                verbosity=base_perf.verbosity,
+                language=lang_setting,
+                enable_batching=base_perf.enable_batching,
+                batch_size=base_perf.batch_size,
+                skip_narration=base_perf.skip_narration,
+                compact_logs=base_perf.compact_logs,
+                max_speech_length=base_perf.max_speech_length,
+                max_reasoning_length=base_perf.max_reasoning_length,
+            )
             
             default_logs_dir = Path.cwd() / "logs"
             default_logs_dir.mkdir(parents=True, exist_ok=True)

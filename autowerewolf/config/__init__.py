@@ -15,6 +15,7 @@ from autowerewolf.config.models import (
     OutputCorrectorConfig,
 )
 from autowerewolf.config.performance import (
+    LanguageSetting,
     MODEL_PROFILES,
     PERFORMANCE_PRESETS,
     PerformanceConfig,
@@ -28,6 +29,7 @@ __all__ = [
     "ModelBackend",
     "ModelConfig",
     "OutputCorrectorConfig",
+    "LanguageSetting",
     "MODEL_PROFILES",
     "PERFORMANCE_PRESETS",
     "PerformanceConfig",

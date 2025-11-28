@@ -46,6 +46,7 @@ from autowerewolf.agents.roles import (
     WitchAgent,
 )
 from autowerewolf.agents.prompts import (
+    Language,
     MINIMAL_PROMPTS,
     STANDARD_PROMPTS,
     FULL_PROMPTS,
@@ -53,8 +54,12 @@ from autowerewolf.agents.prompts import (
     PromptKey,
     format_prompt,
     get_base_system_prompt,
+    get_context_template,
+    get_language,
     get_prompt,
+    get_role_name,
     get_role_system_prompt,
+    set_language,
 )
 from autowerewolf.agents.schemas import (
     BadgeDecisionOutput,
@@ -115,8 +120,13 @@ __all__ = [
     "PromptKey",
     "format_prompt",
     "get_base_system_prompt",
+    "get_context_template",
+    "get_language",
     "get_prompt",
+    "get_role_name",
     "get_role_system_prompt",
+    "set_language",
+    "Language",
     "SpeechOutput",
     "LastWordsOutput",
     "VoteOutput",
