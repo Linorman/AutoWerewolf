@@ -114,6 +114,14 @@ async def health_check():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 
+@app.get("/api/config/ports")
+async def get_ports():
+    """Get the configured API and frontend ports."""
+    api_port = getattr(app.state, "api_port", 8000)
+    frontend_port = getattr(app.state, "frontend_port", 3000)
+    return {"api_port": api_port, "frontend_port": frontend_port}
+
+
 @app.get("/api/defaults")
 async def get_defaults():
     """Get default configurations loaded from config files or built-in defaults."""
@@ -358,24 +366,40 @@ async def favicon():
     return HTMLResponse(content=svg, media_type="image/svg+xml")
 
 
-@app.get("/ui")
-async def serve_ui(request: Request):
+frontend_app = FastAPI(
+    title="AutoWerewolf Frontend",
+    description="Frontend for AutoWerewolf",
+    version="0.1.0",
+)
+
+frontend_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@frontend_app.get("/favicon.ico")
+async def frontend_favicon():
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="45" fill="#0d0d14"/>
+    <path d="M50 15c-19 0-35 16-35 35 0 13 7 24 17 30v-13c-4-4-7-10-7-17 0-14 11-25 25-25s25 11 25 25c0 7-3 13-7 17v13c10-6 17-17 17-30 0-19-16-35-35-35z" fill="#c9485b"/>
+    <circle cx="38" cy="47" r="4" fill="#c9485b"/><circle cx="62" cy="47" r="4" fill="#c9485b"/>
+    <path d="M38 60c0 0 6 8 12 8s12-8 12-8" stroke="#c9485b" stroke-width="2" fill="none"/>
+    </svg>'''
+    return HTMLResponse(content=svg, media_type="image/svg+xml")
+
+
+@frontend_app.get("/")
+async def frontend_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.get("/ui/{path:path}")
-async def serve_ui_path(request: Request, path: str):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-
-@app.get("/")
-async def root(request: Request):
+@frontend_app.get("/{path:path}")
+async def frontend_path(request: Request, path: str):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 def run_server(
     host: str = "0.0.0.0", 
-    port: int = 8000,
+    api_port: int = 8000,
+    frontend_port: int = 3000,
     model_config_path: Optional[str] = None,
     game_config_path: Optional[str] = None,
 ) -> None:
@@ -384,14 +408,30 @@ def run_server(
     
     Args:
         host: Host to bind to.
-        port: Port to listen on.
+        api_port: Port for API server.
+        frontend_port: Port for frontend server.
         model_config_path: Path to model config YAML file. If None, searches default paths.
         game_config_path: Path to game config YAML file. If None, searches default paths.
     """
     import uvicorn
+    import threading
     
     # Load configurations before starting server
     web_config_loader.load_from_file(model_config_path)
     web_config_loader.load_game_config(game_config_path)
     
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    app.state.api_port = api_port
+    app.state.frontend_port = frontend_port
+    
+    def run_frontend():
+        uvicorn.run(frontend_app, host=host, port=frontend_port, log_level="info")
+    
+    # Start frontend server in a separate thread
+    frontend_thread = threading.Thread(target=run_frontend, daemon=True)
+    frontend_thread.start()
+    
+    logger.info(f"Frontend server started on http://{host}:{frontend_port}")
+    logger.info(f"API server starting on http://{host}:{api_port}")
+    
+    # Run API server in main thread
+    uvicorn.run(app, host=host, port=api_port, log_level="info")

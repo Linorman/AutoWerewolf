@@ -1,4 +1,8 @@
-const API_BASE = '/api';
+// API configuration - default to port 8000 for API server
+const API_PORT = 8000;
+const API_HOST = window.location.hostname;
+const API_BASE = `http://${API_HOST}:${API_PORT}/api`;
+const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${API_HOST}:${API_PORT}`;
 
 const GameState = {
     gameId: null,
@@ -267,8 +271,7 @@ async function stopGame() {
 }
 
 function connectWebSocket(gameId) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    GameState.ws = new WebSocket(`${protocol}//${window.location.host}/ws/game/${gameId}`);
+    GameState.ws = new WebSocket(`${WS_BASE}/ws/game/${gameId}`);
     
     GameState.ws.onopen = () => {
         updateConnectionStatus(true);
@@ -646,7 +649,7 @@ async function loadDefaults() {
                 enableCorrectorCheckbox.dispatchEvent(new Event('change'));
             }
             
-            const correctorRetries = document.getElementById('corrector-max-retries');
+            const correctorRetries = document.getElementById('corrector-retries');
             if (correctorRetries && mc.corrector_max_retries !== undefined) {
                 correctorRetries.value = mc.corrector_max_retries;
             }
@@ -666,7 +669,7 @@ async function loadDefaults() {
                 correctorBackend.dispatchEvent(new Event('change'));
             }
             
-            const correctorModelName = document.getElementById('corrector-model-name');
+            const correctorModelName = document.getElementById('corrector-model');
             if (correctorModelName && oc.corrector_model_name) {
                 correctorModelName.value = oc.corrector_model_name;
             }
