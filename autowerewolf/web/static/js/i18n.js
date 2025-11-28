@@ -1,10 +1,14 @@
+const I18N_API_PORT = 8000;
+const I18N_API_HOST = window.location.hostname;
+const I18N_API_BASE = `http://${I18N_API_HOST}:${I18N_API_PORT}/api`;
+
 const I18N = {
     currentLanguage: 'en',
     translations: {},
 
     async load(lang) {
         try {
-            const res = await fetch(`/api/translations/${lang}`);
+            const res = await fetch(`${I18N_API_BASE}/translations/${lang}`);
             const data = await res.json();
             this.translations = data.translations;
             this.currentLanguage = lang;
