@@ -721,11 +721,17 @@ def serve(
         "-h",
         help="Host to bind the server to",
     ),
-    port: int = typer.Option(
+    api_port: int = typer.Option(
         8000,
-        "--port",
-        "-p",
-        help="Port to run the server on",
+        "--api-port",
+        "-a",
+        help="Port for API server",
+    ),
+    frontend_port: int = typer.Option(
+        3000,
+        "--frontend-port",
+        "-f",
+        help="Port for frontend server",
     ),
     model_config: Optional[Path] = typer.Option(
         None,
@@ -750,9 +756,9 @@ def serve(
     display_host = "localhost" if host == "0.0.0.0" else host
     typer.echo(f"\n🐺 AutoWerewolf Web Server Starting...")
     typer.echo(f"=" * 50)
-    typer.echo(f"  🎮 UI Page:    http://{display_host}:{port}/ui")
-    typer.echo(f"  📡 API Base:   http://{display_host}:{port}/api")
-    typer.echo(f"  📖 API Docs:   http://{display_host}:{port}/docs")
+    typer.echo(f"  🎮 Frontend:   http://{display_host}:{frontend_port}")
+    typer.echo(f"  📡 API Base:   http://{display_host}:{api_port}/api")
+    typer.echo(f"  📖 API Docs:   http://{display_host}:{api_port}/docs")
     typer.echo(f"=" * 50)
     
     if model_config:
@@ -770,7 +776,8 @@ def serve(
     
     run_server(
         host=host, 
-        port=port,
+        api_port=api_port,
+        frontend_port=frontend_port,
         model_config_path=str(model_config) if model_config else None,
         game_config_path=str(game_config) if game_config else None,
     )
