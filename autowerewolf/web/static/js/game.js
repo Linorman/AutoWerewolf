@@ -604,12 +604,116 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+async function loadDefaults() {
+    try {
+        const response = await fetch(`${API_BASE}/defaults`);
+        if (!response.ok) {
+            console.warn('Failed to load defaults, using built-in defaults');
+            return;
+        }
+        const defaults = await response.json();
+        
+        const mc = defaults.model_config;
+        if (mc) {
+            const backendSelect = document.getElementById('backend-select');
+            if (backendSelect && mc.backend) {
+                backendSelect.value = mc.backend;
+                backendSelect.dispatchEvent(new Event('change'));
+            }
+            
+            const modelName = document.getElementById('model-name');
+            if (modelName && mc.model_name) modelName.value = mc.model_name;
+            
+            const apiBase = document.getElementById('api-base');
+            if (apiBase && mc.api_base) apiBase.value = mc.api_base;
+            
+            const apiKey = document.getElementById('api-key');
+            if (apiKey && mc.api_key) apiKey.value = mc.api_key;
+            
+            const ollamaUrl = document.getElementById('ollama-url');
+            if (ollamaUrl && mc.ollama_base_url) ollamaUrl.value = mc.ollama_base_url;
+            
+            const temperature = document.getElementById('temperature');
+            if (temperature && mc.temperature !== undefined) temperature.value = mc.temperature;
+            
+            const maxTokens = document.getElementById('max-tokens');
+            if (maxTokens && mc.max_tokens !== undefined) maxTokens.value = mc.max_tokens;
+            
+            const enableCorrectorCheckbox = document.getElementById('enable-corrector');
+            if (enableCorrectorCheckbox && mc.enable_corrector !== undefined) {
+                enableCorrectorCheckbox.checked = mc.enable_corrector;
+                enableCorrectorCheckbox.dispatchEvent(new Event('change'));
+            }
+            
+            const correctorRetries = document.getElementById('corrector-max-retries');
+            if (correctorRetries && mc.corrector_max_retries !== undefined) {
+                correctorRetries.value = mc.corrector_max_retries;
+            }
+        }
+        
+        const oc = defaults.output_corrector_config;
+        if (oc) {
+            const useSeparateModel = document.getElementById('use-separate-model');
+            if (useSeparateModel && oc.use_separate_model !== undefined) {
+                useSeparateModel.checked = oc.use_separate_model;
+                useSeparateModel.dispatchEvent(new Event('change'));
+            }
+            
+            const correctorBackend = document.getElementById('corrector-backend');
+            if (correctorBackend && oc.corrector_backend) {
+                correctorBackend.value = oc.corrector_backend;
+                correctorBackend.dispatchEvent(new Event('change'));
+            }
+            
+            const correctorModelName = document.getElementById('corrector-model-name');
+            if (correctorModelName && oc.corrector_model_name) {
+                correctorModelName.value = oc.corrector_model_name;
+            }
+            
+            const correctorApiBase = document.getElementById('corrector-api-base');
+            if (correctorApiBase && oc.corrector_api_base) {
+                correctorApiBase.value = oc.corrector_api_base;
+            }
+            
+            const correctorApiKey = document.getElementById('corrector-api-key');
+            if (correctorApiKey && oc.corrector_api_key) {
+                correctorApiKey.value = oc.corrector_api_key;
+            }
+            
+            const correctorOllamaUrl = document.getElementById('corrector-ollama-url');
+            if (correctorOllamaUrl && oc.corrector_ollama_base_url) {
+                correctorOllamaUrl.value = oc.corrector_ollama_base_url;
+            }
+        }
+        
+        const gc = defaults.game_config;
+        if (gc) {
+            const roleSet = document.getElementById('role-set');
+            if (roleSet && gc.role_set) roleSet.value = gc.role_set;
+            
+            const randomSeed = document.getElementById('random-seed');
+            if (randomSeed && gc.random_seed !== null && gc.random_seed !== undefined) {
+                randomSeed.value = gc.random_seed;
+            }
+        }
+        
+        console.log(`Config loaded from: ${defaults.config_source}`);
+        console.log(`Game config loaded from: ${defaults.game_config_source}`);
+        
+    } catch (error) {
+        console.warn('Error loading defaults:', error);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initModeSelector();
     initBackendSelector();
     initCorrectorConfig();
     initGameControls();
     document.getElementById('auto-scroll-btn').classList.add('active');
+    
+    // Load defaults from server (config files or built-in defaults)
+    loadDefaults();
 });
 
 window.closeWinnerModal = closeWinnerModal;

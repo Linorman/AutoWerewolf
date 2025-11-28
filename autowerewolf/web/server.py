@@ -25,6 +25,7 @@ from autowerewolf.web.schemas import (
     WSMessageType,
 )
 from autowerewolf.web.session import session_manager
+from autowerewolf.web.config_loader import web_config_loader
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/defaults")
+async def get_defaults():
+    """Get default configurations loaded from config files or built-in defaults."""
+    return web_config_loader.get_defaults_dict()
 
 
 @app.get("/api/translations/{language}")
@@ -366,6 +373,25 @@ async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+def run_server(
+    host: str = "0.0.0.0", 
+    port: int = 8000,
+    model_config_path: Optional[str] = None,
+    game_config_path: Optional[str] = None,
+) -> None:
+    """
+    Start the web server with optional configuration files.
+    
+    Args:
+        host: Host to bind to.
+        port: Port to listen on.
+        model_config_path: Path to model config YAML file. If None, searches default paths.
+        game_config_path: Path to game config YAML file. If None, searches default paths.
+    """
     import uvicorn
+    
+    # Load configurations before starting server
+    web_config_loader.load_from_file(model_config_path)
+    web_config_loader.load_game_config(game_config_path)
+    
     uvicorn.run(app, host=host, port=port, log_level="info")

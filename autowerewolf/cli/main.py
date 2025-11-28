@@ -694,6 +694,18 @@ def serve(
         "-p",
         help="Port to run the server on",
     ),
+    model_config: Optional[Path] = typer.Option(
+        None,
+        "--model-config",
+        "-m",
+        help="Path to model configuration YAML file (default: autowerewolf_models.yaml)",
+    ),
+    game_config: Optional[Path] = typer.Option(
+        None,
+        "--game-config",
+        "-g",
+        help="Path to game configuration YAML file (default: autowerewolf_config.yaml)",
+    ),
 ) -> None:
     """Start the web UI server."""
     try:
@@ -709,8 +721,26 @@ def serve(
     typer.echo(f"  📡 API Base:   http://{display_host}:{port}/api")
     typer.echo(f"  📖 API Docs:   http://{display_host}:{port}/docs")
     typer.echo(f"=" * 50)
+    
+    if model_config:
+        typer.echo(f"  📁 Model Config: {model_config}")
+    else:
+        typer.echo(f"  📁 Model Config: (auto-detect or defaults)")
+    
+    if game_config:
+        typer.echo(f"  🎲 Game Config:  {game_config}")
+    else:
+        typer.echo(f"  🎲 Game Config:  (auto-detect or defaults)")
+    
+    typer.echo(f"=" * 50)
     typer.echo("Press Ctrl+C to stop\n")
-    run_server(host=host, port=port)
+    
+    run_server(
+        host=host, 
+        port=port,
+        model_config_path=str(model_config) if model_config else None,
+        game_config_path=str(game_config) if game_config else None,
+    )
 
 
 @app.command(name="init-config")

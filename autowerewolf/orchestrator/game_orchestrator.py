@@ -125,6 +125,8 @@ class GameOrchestrator:
         performance_config: Optional[PerformanceConfig] = None,
         event_callback: Optional[Callable[[Event, "GameState"], None]] = None,
         narration_callback: Optional[Callable[[str], None]] = None,
+        human_player_seat: Optional[int] = None,
+        human_player_agent: Optional[BasePlayerAgent] = None,
     ):
         self.config = config
         self.agent_models = agent_models
@@ -139,6 +141,8 @@ class GameOrchestrator:
         self._event_callback = event_callback
         self._narration_callback = narration_callback
         self._stop_requested = False
+        self._human_player_seat = human_player_seat
+        self._human_player_agent = human_player_agent
         
         self._game_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:20]
         self._log_level = log_level
@@ -217,7 +221,31 @@ class GameOrchestrator:
             output_corrector = create_output_corrector(corrector_config, corrector_model_config)
             logger.info(f"Output corrector enabled with max_retries={corrector_config.max_retries}")
         
+        # Find human player id if human_player_seat is specified
+        human_player_id: Optional[str] = None
+        if self._human_player_seat is not None:
+            for player in game_state.players:
+                if player.seat_number == self._human_player_seat:
+                    human_player_id = player.id
+                    break
+        
         for player in game_state.players:
+            # Use human agent if this is the human player's seat
+            if human_player_id and player.id == human_player_id and self._human_player_agent:
+                # Update human agent with actual role assignment
+                self._human_player_agent.player_id = player.id
+                self._human_player_agent.player_name = player.name
+                self._human_player_agent.role = player.role
+                
+                # Create memory for human player
+                memory = create_agent_memory(player.id, memory_type)
+                memory.facts._max_facts = max_facts
+                self._human_player_agent.memory = memory
+                
+                agents[player.id] = self._human_player_agent
+                logger.info(f"Human player assigned to seat {self._human_player_seat} (player {player.id}, role: {player.role.value})")
+                continue
+            
             chat_model = self._get_model_for_role(player.role)
             memory = create_agent_memory(player.id, memory_type)
             memory.facts._max_facts = max_facts
@@ -397,64 +425,107 @@ class GameOrchestrator:
             include_self_knife=state.game_state.config.rule_variants.allow_wolf_self_knife,
         )
 
+        from autowerewolf.agents.human import HumanPlayerAgent
+        from autowerewolf.agents.schemas import WerewolfNightOutput
+        
         werewolf_agents: list[WerewolfAgent] = []
+        human_wolf_agent: Optional[BasePlayerAgent] = None
+        human_wolf_id: Optional[str] = None
+        
         for wolf in wolves:
             agent = state.agents.get(wolf.id)
-            if agent and isinstance(agent, WerewolfAgent):
-                werewolf_agents.append(agent)
-
-        if not werewolf_agents:
-            return None, []
+            if agent:
+                if isinstance(agent, HumanPlayerAgent):
+                    human_wolf_agent = agent
+                    human_wolf_id = wolf.id
+                elif isinstance(agent, WerewolfAgent):
+                    werewolf_agents.append(agent)
 
         discussions: list[dict[str, Any]] = []
-        try:
-            lead_wolf = wolves[0]
-            chat_model = werewolf_agents[0].chat_model
-            discussion_chain = WerewolfDiscussionChain(
-                werewolf_agents=werewolf_agents,
-                chat_model=chat_model,
-                camp_memory=self._werewolf_camp_memory,
-            )
+        target_votes: dict[str, int] = {}
+        
+        if human_wolf_agent and human_wolf_id:
+            try:
+                game_view = self.build_game_view(
+                    state.game_state,
+                    human_wolf_id,
+                    {
+                        "valid_targets": valid_targets,
+                        "teammates": [w.id for w in wolves if w.id != human_wolf_id],
+                    },
+                )
+                result = human_wolf_agent.decide_night_action(game_view)
+                
+                if isinstance(result, WerewolfNightOutput):
+                    human_wolf_player = state.game_state.get_player(human_wolf_id)
+                    discussions.append({
+                        "werewolf_id": human_wolf_id,
+                        "werewolf_name": human_wolf_player.name if human_wolf_player else human_wolf_id,
+                        "proposed_target": result.kill_target_id,
+                        "reasoning": "Human player choice",
+                    })
+                    if result.kill_target_id in valid_targets:
+                        target_votes[result.kill_target_id] = target_votes.get(result.kill_target_id, 0) + 1
+            except Exception as e:
+                logger.warning(f"Human werewolf action failed: {e}")
+        
+        if werewolf_agents:
+            try:
+                lead_wolf = wolves[0]
+                chat_model = werewolf_agents[0].chat_model
+                discussion_chain = WerewolfDiscussionChain(
+                    werewolf_agents=werewolf_agents,
+                    chat_model=chat_model,
+                    camp_memory=self._werewolf_camp_memory,
+                )
 
-            game_view = self.build_game_view(
-                state.game_state,
-                lead_wolf.id,
-                {
-                    "valid_targets": valid_targets,
-                    "teammates": [w.id for w in wolves if w.id != lead_wolf.id],
-                },
-            )
+                game_view = self.build_game_view(
+                    state.game_state,
+                    lead_wolf.id,
+                    {
+                        "valid_targets": valid_targets,
+                        "teammates": [w.id for w in wolves if w.id != lead_wolf.id],
+                    },
+                )
 
-            proposals = discussion_chain.get_proposals(game_view)
-            for wolf_id, proposal in proposals:
-                wolf_player = state.game_state.get_player(wolf_id)
-                discussions.append({
-                    "werewolf_id": wolf_id,
-                    "werewolf_name": wolf_player.name if wolf_player else wolf_id,
-                    "proposed_target": proposal.target_player_id,
-                    "reasoning": proposal.reasoning,
-                })
-
-            consensus_target = discussion_chain.reach_consensus(game_view, proposals)
-
-            if self._werewolf_camp_memory:
+                proposals = discussion_chain.get_proposals(game_view)
                 for wolf_id, proposal in proposals:
-                    self._werewolf_camp_memory.add_discussion_note(
-                        state.game_state.day_number,
-                        wolf_id,
-                        f"Proposed {proposal.target_player_id}: {proposal.reasoning}",
-                    )
+                    wolf_player = state.game_state.get_player(wolf_id)
+                    discussions.append({
+                        "werewolf_id": wolf_id,
+                        "werewolf_name": wolf_player.name if wolf_player else wolf_id,
+                        "proposed_target": proposal.target_player_id,
+                        "reasoning": proposal.reasoning,
+                    })
+                    if proposal.target_player_id in valid_targets:
+                        target_votes[proposal.target_player_id] = target_votes.get(proposal.target_player_id, 0) + 1
+
+                if self._werewolf_camp_memory:
+                    for wolf_id, proposal in proposals:
+                        self._werewolf_camp_memory.add_discussion_note(
+                            state.game_state.day_number,
+                            wolf_id,
+                            f"Proposed {proposal.target_player_id}: {proposal.reasoning}",
+                        )
+
+            except Exception as e:
+                logger.warning(f"Werewolf discussion failed: {e}")
+
+        # Determine consensus target by voting
+        if target_votes:
+            consensus_target = max(target_votes.keys(), key=lambda t: target_votes[t])
+            
+            if self._werewolf_camp_memory:
                 self._werewolf_camp_memory.add_kill(state.game_state.day_number, consensus_target)
 
-            if consensus_target and consensus_target in valid_targets:
+            if consensus_target in valid_targets:
+                lead_wolf_id = wolves[0].id
                 return WolfKillAction(
-                    actor_id=lead_wolf.id,
+                    actor_id=lead_wolf_id,
                     target_id=consensus_target,
                 ), discussions
 
-        except Exception as e:
-            logger.warning(f"Werewolf discussion failed: {e}")
-
+        # Fallback to random target
         if valid_targets:
             target = random.choice(valid_targets)
             return WolfKillAction(actor_id=wolves[0].id, target_id=target), discussions
@@ -510,10 +581,15 @@ class GameOrchestrator:
         if not agent:
             return None, None
 
+        valid_targets = [
+            p.id for p in state.game_state.get_alive_players() if p.id != witch.id
+        ]
+
         action_context = {
             "has_cure": witch.witch_has_cure,
             "has_poison": witch.witch_has_poison,
             "attack_target": state.game_state.wolf_kill_target_id,
+            "valid_targets": valid_targets,
         }
 
         try:
@@ -532,10 +608,11 @@ class GameOrchestrator:
                         target_id=state.game_state.wolf_kill_target_id,
                     )
                 if result.use_poison and witch.witch_has_poison and result.poison_target_id:
-                    poison_action = WitchPoisonAction(
-                        actor_id=witch.id,
-                        target_id=result.poison_target_id,
-                    )
+                    if result.poison_target_id in valid_targets:
+                        poison_action = WitchPoisonAction(
+                            actor_id=witch.id,
+                            target_id=result.poison_target_id,
+                        )
 
             return cure_action, poison_action
         except Exception as e:
@@ -852,10 +929,18 @@ class GameOrchestrator:
                 player_id,
                 {"giving_last_words": True, "is_dying": True},
             )
-            result = agent.decide_day_speech(game_view)
+            
+            from autowerewolf.agents.human import HumanPlayerAgent
+            from autowerewolf.agents.schemas import LastWordsOutput
+            
+            if isinstance(agent, HumanPlayerAgent):
+                result = agent.decide_last_words(game_view)
+                content = result.content if isinstance(result, LastWordsOutput) else str(result)
+            else:
+                result = agent.decide_day_speech(game_view)
+                content = result.content if isinstance(result, SpeechOutput) else str(result)
 
-            if isinstance(result, SpeechOutput):
-                content = result.content
+            if content:
                 if len(content) > self.performance_config.max_speech_length:
                     content = content[: self.performance_config.max_speech_length] + "..."
                 event = SpeechEvent(
@@ -891,11 +976,15 @@ class GameOrchestrator:
                 {"valid_targets": valid_targets, "dying": True},
             )
 
+            from autowerewolf.agents.human import HumanPlayerAgent
             from autowerewolf.agents.schemas import HunterShootOutput
 
             result = None
             try:
-                raw_result = agent.decide_night_action(game_view)
+                if isinstance(agent, HumanPlayerAgent):
+                    raw_result = agent.decide_hunter_shot(game_view)
+                else:
+                    raw_result = agent.decide_night_action(game_view)
                 if isinstance(raw_result, HunterShootOutput):
                     result = raw_result
             except Exception:
@@ -961,7 +1050,6 @@ class GameOrchestrator:
             state.game_state.phase = Phase.GAME_OVER
             return state
 
-        # On Day 1, sheriff election happens BEFORE death announcement (per rules)
         if state.game_state.day_number == 1:
             state = self._run_sheriff_election(state)
 

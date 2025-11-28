@@ -220,6 +220,21 @@ class GameSession:
             default_logs_dir = Path.cwd() / "logs"
             default_logs_dir.mkdir(parents=True, exist_ok=True)
             
+            human_player_agent = None
+            if self.mode == GameMode.PLAY and self.player_seat is not None:
+                from autowerewolf.agents.human import HumanPlayerAgent
+                from autowerewolf.engine.roles import Role
+                
+                self._human_input_handler = WebInputHandler()
+                self._human_agent = HumanPlayerAgent(
+                    player_id="",
+                    player_name=self.player_name,
+                    role=Role.VILLAGER,
+                    input_handler=self._human_input_handler,
+                )
+                human_player_agent = self._human_agent
+                logger.info(f"Human player created for seat {self.player_seat}")
+            
             self.orchestrator = GameOrchestrator(
                 config=game_config,
                 agent_models=agent_model_config,
@@ -229,6 +244,8 @@ class GameSession:
                 performance_config=perf_config,
                 event_callback=self._on_event,
                 narration_callback=self._on_narration,
+                human_player_seat=self.player_seat if self.mode == GameMode.PLAY else None,
+                human_player_agent=human_player_agent,
             )
             
             self.result = self.orchestrator.run_game()
