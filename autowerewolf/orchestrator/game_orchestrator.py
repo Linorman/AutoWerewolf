@@ -354,6 +354,7 @@ class GameOrchestrator:
         game_state: GameState,
         player_id: str,
         action_context: Optional[dict[str, Any]] = None,
+        speech_context: Optional[dict[str, Any]] = None,
     ) -> GameView:
         player = game_state.get_player(player_id)
         if not player:
@@ -365,9 +366,19 @@ class GameOrchestrator:
                 "name": p.name,
                 "seat_number": p.seat_number,
                 "is_sheriff": p.is_sheriff,
-                "is_alive": p.is_alive,
             }
             for p in game_state.players
+            if p.is_alive
+        ]
+
+        dead_players = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "seat_number": p.seat_number,
+            }
+            for p in game_state.players
+            if not p.is_alive
         ]
 
         public_events = game_state.get_public_events()
@@ -388,6 +399,8 @@ class GameOrchestrator:
             public_history=public_history,
             private_info=private_info,
             action_context=action_context or {},
+            speech_context=speech_context,
+            dead_players=dead_players,
         )
 
     def _describe_event_for_view(self, event: Event, game_state: GameState) -> str:
@@ -665,9 +678,20 @@ class GameOrchestrator:
         if not agent:
             return None
 
+        action_context: dict[str, Any] = {
+            "valid_targets": valid_targets,
+        }
+        if guard.guard_last_protected:
+            last_protected_player = state.game_state.get_player(guard.guard_last_protected)
+            action_context["last_protected"] = {
+                "id": guard.guard_last_protected,
+                "name": last_protected_player.name if last_protected_player else guard.guard_last_protected,
+            }
+            action_context["cannot_protect_same"] = True
+
         try:
             game_view = self.build_game_view(
-                state.game_state, guard.id, {"valid_targets": valid_targets}
+                state.game_state, guard.id, action_context
             )
             result = agent.decide_night_action(game_view)
 
@@ -781,21 +805,22 @@ class GameOrchestrator:
 
         votes: dict[str, str] = {}
         for player in state.game_state.get_alive_players():
-            if player.id in candidates:
-                continue
-
             agent = state.agents.get(player.id)
             if not agent:
+                continue
+
+            votable_candidates = [c for c in candidates if c != player.id]
+            if not votable_candidates:
                 continue
 
             try:
                 game_view = self.build_game_view(
                     state.game_state,
                     player.id,
-                    {"candidates": candidates},
+                    {"candidates": votable_candidates, "is_candidate": player.id in candidates},
                 )
                 result = agent.decide_vote(game_view)
-                if result.target_player_id in candidates:
+                if result.target_player_id in votable_candidates:
                     votes[player.id] = result.target_player_id
             except Exception as e:
                 logger.warning(f"Sheriff vote failed for {player.id}: {e}")
@@ -808,6 +833,24 @@ class GameOrchestrator:
 
         return state
 
+    def _build_speech_context(
+        self,
+        ordered_players: list[Any],
+        current_index: int,
+        spoken_speeches: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        speech_order = [{"id": p.id, "name": p.name} for p in ordered_players]
+        spoken_players = [{"id": p.id, "name": p.name} for p in ordered_players[:current_index]]
+        pending_players = [{"id": p.id, "name": p.name} for p in ordered_players[current_index + 1:]]
+        
+        return {
+            "speech_order": speech_order,
+            "current_position": current_index,
+            "spoken_players": spoken_players,
+            "pending_players": pending_players,
+            "spoken_speeches": spoken_speeches,
+        }
+
     def _run_day_speeches(self, state: OrchestratorState) -> OrchestratorState:
         alive_players = state.game_state.get_alive_players()
 
@@ -817,12 +860,19 @@ class GameOrchestrator:
         else:
             ordered = alive_players
 
+        spoken_speeches: list[dict[str, Any]] = []
+
         if self.performance_config.enable_batching and self._batch_executor:
             requests = []
-            for player in ordered:
+            for idx, player in enumerate(ordered):
                 agent = state.agents.get(player.id)
                 if agent:
-                    game_view = self.build_game_view(state.game_state, player.id)
+                    speech_context = self._build_speech_context(ordered, idx, spoken_speeches.copy())
+                    game_view = self.build_game_view(
+                        state.game_state, 
+                        player.id,
+                        speech_context=speech_context,
+                    )
                     requests.append((agent, game_view))
 
             results = self._batch_executor.execute_speeches_batch(requests)
@@ -831,6 +881,12 @@ class GameOrchestrator:
                     content = self._truncate_content(batch_result.result.content)
                     player = state.game_state.get_player(batch_result.player_id)
                     player_name = player.name if player else batch_result.player_id
+                    
+                    spoken_speeches.append({
+                        "player_id": batch_result.player_id,
+                        "player_name": player_name,
+                        "content": content,
+                    })
                     
                     event = SpeechEvent(
                         day_number=state.game_state.day_number,
@@ -850,17 +906,29 @@ class GameOrchestrator:
                             content,
                         )
         else:
-            for player in ordered:
+            for idx, player in enumerate(ordered):
                 agent = state.agents.get(player.id)
                 if not agent:
                     continue
 
                 try:
-                    game_view = self.build_game_view(state.game_state, player.id)
+                    speech_context = self._build_speech_context(ordered, idx, spoken_speeches.copy())
+                    game_view = self.build_game_view(
+                        state.game_state, 
+                        player.id,
+                        speech_context=speech_context,
+                    )
                     result = agent.decide_day_speech(game_view)
 
                     if isinstance(result, SpeechOutput):
                         content = self._truncate_content(result.content)
+                        
+                        spoken_speeches.append({
+                            "player_id": player.id,
+                            "player_name": player.name,
+                            "content": content,
+                        })
+                        
                         event = SpeechEvent(
                             day_number=state.game_state.day_number,
                             phase=Phase.DAY,
@@ -883,6 +951,31 @@ class GameOrchestrator:
 
         return state
 
+    def _build_vote_context(
+        self,
+        game_state: GameState,
+        player_id: str,
+        valid_targets: list[str],
+    ) -> dict[str, Any]:
+        today_speeches = []
+        for event in game_state.history:
+            if (event.day_number == game_state.day_number and 
+                event.event_type.value == "speech" and 
+                event.data.get("content") and
+                event.actor_id):
+                actor = game_state.get_player(event.actor_id)
+                actor_name = actor.name if actor else event.actor_id
+                today_speeches.append({
+                    "player_id": event.actor_id,
+                    "player_name": actor_name,
+                    "content": event.data.get("content", "")[:500],
+                })
+        
+        return {
+            "valid_targets": valid_targets,
+            "today_speeches": today_speeches,
+        }
+
     def _run_day_vote(self, state: OrchestratorState) -> OrchestratorState:
         if not self.performance_config.skip_narration:
             narration = state.moderator.announce_voting_start()
@@ -898,10 +991,15 @@ class GameOrchestrator:
                 if agent:
                     valid_targets = get_valid_vote_targets(state.game_state, player.id)
                     player_targets[player.id] = valid_targets
+                    vote_context = self._build_vote_context(
+                        state.game_state,
+                        player.id,
+                        valid_targets,
+                    )
                     game_view = self.build_game_view(
                         state.game_state,
                         player.id,
-                        {"valid_targets": valid_targets},
+                        vote_context,
                     )
                     requests.append((agent, game_view))
 
@@ -924,10 +1022,15 @@ class GameOrchestrator:
                 valid_targets = get_valid_vote_targets(state.game_state, player.id)
 
                 try:
+                    vote_context = self._build_vote_context(
+                        state.game_state,
+                        player.id,
+                        valid_targets,
+                    )
                     game_view = self.build_game_view(
                         state.game_state,
                         player.id,
-                        {"valid_targets": valid_targets},
+                        vote_context,
                     )
                     result = agent.decide_vote(game_view)
 
@@ -1195,6 +1298,9 @@ class GameOrchestrator:
 
             if player and player.role == Role.HUNTER and player.hunter_can_shoot:
                 state = self._handle_hunter_shot(state, death_id)
+            
+            if player and player.is_sheriff:
+                state = self._handle_badge_decision(state, death_id)
 
         if death_events:
             self._update_all_agents_memory_after_night(state, death_events)

@@ -278,15 +278,23 @@ class TestMemoryCompression:
     def test_fact_memory_compression(self):
         memory = GameFactMemory("p1", max_facts=10)
         for i in range(15):
-            memory.add_speech_summary(1, f"p{i}", f"Speech {i}")
+            memory.add_speech_summary(2, f"p{i}", f"Speech {i}")
         
         assert len(memory._facts) <= 10
         assert memory._compressed_summary != ""
 
-    def test_fact_memory_compressed_summary_in_context(self):
+    def test_fact_memory_no_compression_in_first_round(self):
         memory = GameFactMemory("p1", max_facts=10)
         for i in range(15):
             memory.add_speech_summary(1, f"p{i}", f"Speech {i}")
+        
+        assert len(memory._facts) == 15
+        assert memory._compressed_summary == ""
+
+    def test_fact_memory_compressed_summary_in_context(self):
+        memory = GameFactMemory("p1", max_facts=10)
+        for i in range(15):
+            memory.add_speech_summary(2, f"p{i}", f"Speech {i}")
         
         context = memory.to_context_string()
         assert "[Historical Summary]" in context or "[Recent Events]" in context

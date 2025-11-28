@@ -36,9 +36,14 @@ class GameFactMemory:
         self._max_facts = max_facts
         self._compressed_summary: str = ""
 
+    def _get_max_day_number(self) -> int:
+        if not self._facts:
+            return 0
+        return max(f.day_number for f in self._facts)
+
     def add_fact(self, fact: GameFact) -> None:
         self._facts.append(fact)
-        if len(self._facts) > self._max_facts:
+        if len(self._facts) > self._max_facts and self._get_max_day_number() > 1:
             self._compress_old_facts()
 
     def add_role_claim(
@@ -335,6 +340,8 @@ class AgentMemory:
         self._maybe_compress()
 
     def _maybe_compress(self) -> None:
+        if self.facts._get_max_day_number() <= 1:
+            return
         if self.memory_type == "summary" and len(self.facts._facts) > self._summary_threshold:
             self._generate_summary()
 

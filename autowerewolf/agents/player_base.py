@@ -44,6 +44,8 @@ class GameView:
         private_info: Optional[dict[str, Any]] = None,
         action_context: Optional[dict[str, Any]] = None,
         language: Optional[Language | str] = None,
+        speech_context: Optional[dict[str, Any]] = None,
+        dead_players: Optional[list[dict[str, Any]]] = None,
     ):
         self.player_id = player_id
         self.player_name = player_name
@@ -55,19 +57,12 @@ class GameView:
         self.private_info = private_info or {}
         self.action_context = action_context or {}
         self.language = language
+        self.speech_context = speech_context or {}
+        self.dead_players = dead_players or []
 
     def to_prompt_context(self, language: Optional[Language | str] = None) -> str:
-        """Convert game view to prompt context string.
-        
-        Args:
-            language: Language to use. If None, uses instance language or global setting.
-        
-        Returns:
-            Formatted context string
-        """
         lang = language or self.language
         
-        # Get localized role name
         role_name = get_role_name(self.role, lang)
         
         lines = [
@@ -93,6 +88,44 @@ class GameView:
                     sheriff=mark
                 )
             )
+
+        if self.dead_players:
+            lines.append("")
+            lines.append(get_context_template("dead_players", lang))
+            for p in self.dead_players:
+                lines.append(
+                    get_context_template("dead_player_entry", lang).format(
+                        name=p['name'],
+                        id=p['id'],
+                        seat=p.get('seat_number', '?')
+                    )
+                )
+
+        if self.speech_context:
+            lines.append("")
+            lines.append(get_context_template("speech_order_info", lang))
+            
+            speech_order = self.speech_context.get("speech_order", [])
+            current_position = self.speech_context.get("current_position", 0)
+            spoken_players = self.speech_context.get("spoken_players", [])
+            pending_players = self.speech_context.get("pending_players", [])
+            
+            lines.append(get_context_template("your_speech_position", lang).format(
+                position=current_position + 1,
+                total=len(speech_order)
+            ))
+            
+            if spoken_players:
+                lines.append(get_context_template("spoken_players", lang))
+                for sp in spoken_players:
+                    lines.append(f"  - {sp['name']} (ID: {sp['id']})")
+            
+            if pending_players:
+                lines.append(get_context_template("pending_players", lang))
+                for pp in pending_players:
+                    lines.append(f"  - {pp['name']} (ID: {pp['id']})")
+            
+            lines.append(get_context_template("speech_guidance", lang))
 
         if self.private_info:
             lines.append("")
