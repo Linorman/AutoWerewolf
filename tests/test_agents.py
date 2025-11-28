@@ -68,7 +68,7 @@ class TestGameView:
 
         assert "Player1" in context
         assert "p1" in context
-        assert "villager" in context
+        assert "Villager" in context
         assert "day" in context
         assert "Day 1" in context
 

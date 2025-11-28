@@ -86,8 +86,14 @@ STANDARD_PROMPTS = {
         "Play like normal villager."
     ),
     PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action. Return JSON.",
-    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Return JSON with 'content'.",
-    PromptKey.VOTE: "{context}\n\nCast your vote. Return JSON with 'target_player_id' and 'reasoning'.",
+    PromptKey.SPEECH: (
+        "{context}\n\nDeliver your speech. Only analyze players who already spoke. "
+        "Do NOT accuse players who haven't spoken yet. Return JSON with 'content'."
+    ),
+    PromptKey.VOTE: (
+        "{context}\n\nCast your vote from valid_targets list. "
+        "Return JSON with 'target_player_id' and 'reasoning'."
+    ),
     PromptKey.LAST_WORDS: "{context}\n\nDeliver your last words. Return JSON with 'content'.",
     PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff. Return JSON with 'run_for_sheriff' (bool).",
     PromptKey.BADGE_PASS: "{context}\n\nPass or tear badge. Return JSON with 'action' ('pass'/'tear') and 'target_player_id'.",
@@ -160,8 +166,25 @@ FULL_PROMPTS = {
         "If killed at night, you die normally without protection."
     ),
     PromptKey.NIGHT_ACTION: "{context}\n\nDecide your night action. Ensure your JSON response matches your role's action format.",
-    PromptKey.SPEECH: "{context}\n\nDeliver your speech. Be persuasive and strategic. Return JSON with a 'content' field.",
-    PromptKey.VOTE: "{context}\n\nCast your vote. You MUST select exactly one player_id from the valid_targets list provided. Return JSON with 'target_player_id' and 'reasoning'.",
+    PromptKey.SPEECH: (
+        "{context}\n\n"
+        "Deliver your speech. Guidelines:\n"
+        "1. ONLY analyze players who have ALREADY spoken (listed in 'spoken_players')\n"
+        "2. Do NOT accuse or suspect players who haven't spoken yet - they simply haven't had their turn\n"
+        "3. If you're speaking first/early, focus on sharing your own observations or role claims\n"
+        "4. Base suspicions on actual behavior: speech content, voting patterns, contradictions\n"
+        "5. Be strategic: consider what information benefits your team\n"
+        "Return JSON with a 'content' field containing your speech."
+    ),
+    PromptKey.VOTE: (
+        "{context}\n\n"
+        "Cast your vote. Guidelines:\n"
+        "1. You MUST select exactly one player_id from the valid_targets list\n"
+        "2. Base your vote on evidence from speeches and observed behavior\n"
+        "3. Consider voting patterns, contradictions, and suspicious defenses\n"
+        "4. As village: vote for suspected werewolves; As werewolf: deflect to villagers\n"
+        "Return JSON with 'target_player_id' (must be from valid_targets) and 'reasoning'."
+    ),
     PromptKey.LAST_WORDS: "{context}\n\nYou are dying. Deliver your last words to help your team. Return JSON with 'content'.",
     PromptKey.SHERIFF_RUN: "{context}\n\nDecide whether to run for sheriff. Consider your role and strategy. Return JSON with 'run_for_sheriff' (bool).",
     PromptKey.BADGE_PASS: "{context}\n\nYou are dying as sheriff. Decide to pass or tear the badge. Return JSON with 'action' ('pass' or 'tear') and 'target_player_id' (if passing).",
@@ -228,8 +251,14 @@ STANDARD_PROMPTS_ZH = {
         "像普通村民一样游戏。"
     ),
     PromptKey.NIGHT_ACTION: "{context}\n\n决定你的夜间行动。返回JSON格式。",
-    PromptKey.SPEECH: "{context}\n\n进行发言。返回JSON格式，包含'content'字段。",
-    PromptKey.VOTE: "{context}\n\n进行投票。你必须从valid_targets列表中选择一名玩家。返回JSON格式，包含'target_player_id'和'reasoning'字段。",
+    PromptKey.SPEECH: (
+        "{context}\n\n进行发言。只能分析已经发言的玩家。"
+        "不要指责还未发言的玩家。返回JSON格式，包含'content'字段。"
+    ),
+    PromptKey.VOTE: (
+        "{context}\n\n进行投票，从valid_targets列表选择。"
+        "返回JSON格式，包含'target_player_id'和'reasoning'字段。"
+    ),
     PromptKey.LAST_WORDS: "{context}\n\n发表遗言。返回JSON格式，包含'content'字段。",
     PromptKey.SHERIFF_RUN: "{context}\n\n决定是否竞选警长。返回JSON格式，包含'run_for_sheriff'(布尔值)。",
     PromptKey.BADGE_PASS: "{context}\n\n传递或撕毁警徽。返回JSON格式，包含'action'('pass'或'tear')和'target_player_id'(如果传递)。",
@@ -302,8 +331,25 @@ FULL_PROMPTS_ZH = {
         "如果晚上被杀，你会正常死亡，没有保护。"
     ),
     PromptKey.NIGHT_ACTION: "{context}\n\n决定你的夜间行动。确保你的JSON回复符合你角色的行动格式。",
-    PromptKey.SPEECH: "{context}\n\n进行发言。要有说服力和策略性。返回JSON格式，包含'content'字段。",
-    PromptKey.VOTE: "{context}\n\n进行投票。你必须从valid_targets列表中选择一名玩家的player_id。返回JSON格式，包含'target_player_id'和'reasoning'字段。",
+    PromptKey.SPEECH: (
+        "{context}\n\n"
+        "进行发言。发言指南：\n"
+        "1. 只能分析已经发言的玩家（在'spoken_players'中列出的玩家）\n"
+        "2. 不要指责或怀疑还未发言的玩家——他们只是还没轮到发言\n"
+        "3. 如果你是第一个或靠前发言，重点分享你的观察或报身份\n"
+        "4. 怀疑要基于实际行为：发言内容、投票模式、矛盾之处\n"
+        "5. 策略性发言：考虑什么信息对你的阵营有利\n"
+        "返回JSON格式，包含'content'字段。"
+    ),
+    PromptKey.VOTE: (
+        "{context}\n\n"
+        "进行投票。投票指南：\n"
+        "1. 必须从valid_targets列表中选择一名玩家的player_id\n"
+        "2. 根据发言内容和观察到的行为进行投票\n"
+        "3. 考虑投票模式、矛盾之处和可疑的辩护\n"
+        "4. 好人阵营：投票给怀疑的狼人；狼人阵营：把票引向村民\n"
+        "返回JSON格式，包含'target_player_id'（必须来自valid_targets）和'reasoning'字段。"
+    ),
     PromptKey.LAST_WORDS: "{context}\n\n你即将死亡。发表遗言帮助你的队伍。返回JSON格式，包含'content'字段。",
     PromptKey.SHERIFF_RUN: "{context}\n\n决定是否竞选警长。考虑你的角色和策略。返回JSON格式，包含'run_for_sheriff'(布尔值)。",
     PromptKey.BADGE_PASS: "{context}\n\n你即将作为警长死亡。决定传递或撕毁警徽。返回JSON格式，包含'action'('pass'或'tear')和'target_player_id'(如果传递)。",
@@ -521,6 +567,8 @@ CONTEXT_TEMPLATES: Dict[Language, Dict[str, str]] = {
         "alive_players": "Alive players:",
         "player_entry": "  - {name} (ID: {id}, Seat: {seat}){sheriff}",
         "sheriff_mark": " [Sheriff]",
+        "dead_players": "Dead players (CANNOT be targeted for votes or actions):",
+        "dead_player_entry": "  - {name} (ID: {id}, Seat: {seat}) [DEAD]",
         "private_info": "Your private information:",
         "action_context": "Action context:",
         "recent_events": "Recent public events:",
@@ -531,6 +579,11 @@ CONTEXT_TEMPLATES: Dict[Language, Dict[str, str]] = {
         "attack_target": "Tonight's attack target: {target}",
         "last_protected": "Last protected: {target}",
         "cannot_protect_same": "You cannot protect the same player twice in a row.",
+        "speech_order_info": "Speech order information:",
+        "your_speech_position": "  You are speaking at position {position}/{total}",
+        "spoken_players": "  Players who have already spoken:",
+        "pending_players": "  Players who have not yet spoken:",
+        "speech_guidance": "  IMPORTANT: Only analyze and comment on players who have ALREADY spoken. Do NOT accuse or suspect players who have not spoken yet - they simply have not had their turn.",
     },
     Language.ZH: {
         "player_intro": "你是玩家 {name}（ID: {player_id}）",
@@ -539,6 +592,8 @@ CONTEXT_TEMPLATES: Dict[Language, Dict[str, str]] = {
         "alive_players": "存活玩家:",
         "player_entry": "  - {name}（ID: {id}, 座位: {seat}）{sheriff}",
         "sheriff_mark": " [警长]",
+        "dead_players": "死亡玩家（不能作为投票或行动的目标）:",
+        "dead_player_entry": "  - {name}（ID: {id}, 座位: {seat}）[已死亡]",
         "private_info": "你的私密信息:",
         "action_context": "行动上下文:",
         "recent_events": "最近的公开事件:",
@@ -549,6 +604,11 @@ CONTEXT_TEMPLATES: Dict[Language, Dict[str, str]] = {
         "attack_target": "今晚被袭击的目标: {target}",
         "last_protected": "上次守护的人: {target}",
         "cannot_protect_same": "你不能连续两晚守护同一名玩家。",
+        "speech_order_info": "发言顺序信息:",
+        "your_speech_position": "  你是第 {position}/{total} 个发言",
+        "spoken_players": "  已经发言的玩家:",
+        "pending_players": "  还未发言的玩家:",
+        "speech_guidance": "  重要：只能分析和评论已经发言的玩家。不要指责或怀疑还未发言的玩家——他们只是还没轮到发言。",
     },
 }
 
