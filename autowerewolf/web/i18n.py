@@ -628,6 +628,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Automatically fix malformed model outputs",
         "zh": "自动修复格式错误的模型输出",
     },
+    "model_config_hint": {
+        "en": "Model configuration is loaded from server config file",
+        "zh": "模型配置从服务器配置文件加载",
+    },
     "advanced_settings": {
         "en": "Advanced Settings",
         "zh": "高级设置",

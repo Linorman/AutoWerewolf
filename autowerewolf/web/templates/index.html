@@ -61,37 +61,38 @@
 
                         <div class="config-section">
                             <h3 data-i18n="model_config">Model Settings</h3>
+                            <p class="config-hint" data-i18n="model_config_hint">Model configuration is loaded from server config file</p>
                             <div class="form-group">
                                 <label data-i18n="backend">Backend</label>
-                                <select id="backend-select" class="select-control">
+                                <select id="backend-select" class="select-control" disabled>
                                     <option value="ollama">Ollama</option>
                                     <option value="api">API</option>
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label data-i18n="model_name">Model Name</label>
-                                <input type="text" id="model-name" class="input-control" value="llama3">
+                                <input type="text" id="model-name" class="input-control" value="" placeholder="" disabled>
                             </div>
-                            <div class="form-group" id="ollama-url-group">
+                            <div class="form-group hidden" id="ollama-url-group">
                                 <label data-i18n="ollama_url">Ollama URL</label>
-                                <input type="text" id="ollama-url" class="input-control" placeholder="http://localhost:11434">
+                                <input type="text" id="ollama-url" class="input-control" placeholder="" disabled>
                             </div>
                             <div class="form-group hidden" id="api-base-group">
                                 <label data-i18n="api_base">API Base URL</label>
-                                <input type="text" id="api-base" class="input-control" placeholder="https://api.openai.com/v1">
+                                <input type="text" id="api-base" class="input-control" placeholder="" disabled>
                             </div>
                             <div class="form-group hidden" id="api-key-group">
                                 <label data-i18n="api_key">API Key</label>
-                                <input type="password" id="api-key" class="input-control">
+                                <input type="password" id="api-key" class="input-control" disabled>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label data-i18n="temperature">Temperature</label>
-                                    <input type="number" id="temperature" class="input-control" value="0.7" min="0" max="2" step="0.1">
+                                    <input type="number" id="temperature" class="input-control" value="" min="0" max="2" step="0.1" disabled>
                                 </div>
                                 <div class="form-group">
                                     <label data-i18n="max_tokens">Max Tokens</label>
-                                    <input type="number" id="max-tokens" class="input-control" value="1024" min="100" max="4096">
+                                    <input type="number" id="max-tokens" class="input-control" value="" min="100" max="4096" disabled>
                                 </div>
                             </div>
                         </div>
@@ -101,44 +102,44 @@
                             <p class="config-hint" data-i18n="corrector_desc">Automatically fix malformed model outputs</p>
                             <div class="form-group checkbox-group">
                                 <label class="checkbox-label">
-                                    <input type="checkbox" id="enable-corrector" checked>
+                                    <input type="checkbox" id="enable-corrector" checked disabled>
                                     <span data-i18n="enable_corrector">Enable Corrector</span>
                                 </label>
                             </div>
                             <div id="corrector-options">
                                 <div class="form-group">
                                     <label data-i18n="corrector_retries">Max Retries</label>
-                                    <input type="number" id="corrector-retries" class="input-control" value="2" min="1" max="5">
+                                    <input type="number" id="corrector-retries" class="input-control" value="" min="1" max="5" disabled>
                                 </div>
                                 <div class="form-group checkbox-group">
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="use-separate-model">
+                                        <input type="checkbox" id="use-separate-model" disabled>
                                         <span data-i18n="use_separate_model">Use Separate Model</span>
                                     </label>
                                 </div>
                                 <div id="corrector-model-config" class="hidden nested-config">
                                     <div class="form-group">
                                         <label data-i18n="corrector_backend">Corrector Backend</label>
-                                        <select id="corrector-backend" class="select-control">
+                                        <select id="corrector-backend" class="select-control" disabled>
                                             <option value="ollama">Ollama</option>
                                             <option value="api">API</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
                                         <label data-i18n="corrector_model">Corrector Model</label>
-                                        <input type="text" id="corrector-model" class="input-control" placeholder="">
+                                        <input type="text" id="corrector-model" class="input-control" placeholder="" disabled>
                                     </div>
-                                    <div class="form-group" id="corrector-ollama-url-group">
+                                    <div class="form-group hidden" id="corrector-ollama-url-group">
                                         <label data-i18n="corrector_ollama_url">Corrector Ollama URL</label>
-                                        <input type="text" id="corrector-ollama-url" class="input-control" placeholder="http://localhost:11434">
+                                        <input type="text" id="corrector-ollama-url" class="input-control" placeholder="" disabled>
                                     </div>
                                     <div class="form-group hidden" id="corrector-api-base-group">
                                         <label data-i18n="corrector_api_base">Corrector API Base</label>
-                                        <input type="text" id="corrector-api-base" class="input-control" placeholder="https://api.openai.com/v1">
+                                        <input type="text" id="corrector-api-base" class="input-control" placeholder="" disabled>
                                     </div>
                                     <div class="form-group hidden" id="corrector-api-key-group">
                                         <label data-i18n="corrector_api_key">Corrector API Key</label>
-                                        <input type="password" id="corrector-api-key" class="input-control">
+                                        <input type="password" id="corrector-api-key" class="input-control" disabled>
                                     </div>
                                 </div>
                             </div>
