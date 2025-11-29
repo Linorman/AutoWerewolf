@@ -11,12 +11,18 @@ class FactType(str, Enum):
     SEER_CHECK = "seer_check"
     VOTE_CAST = "vote_cast"
     SPEECH_SUMMARY = "speech_summary"
+    SPEECH_FULL = "speech_full"
     DEATH = "death"
     SUSPICIOUS_BEHAVIOR = "suspicious_behavior"
     TRUSTED_PLAYER = "trusted_player"
     WEREWOLF_TARGET = "werewolf_target"
     PROTECTION = "protection"
     POTION_USED = "potion_used"
+    LYNCH = "lynch"
+    SHERIFF_ELECTED = "sheriff_elected"
+    BADGE_ACTION = "badge_action"
+    HUNTER_SHOT = "hunter_shot"
+    NIGHT_RESULT = "night_result"
 
 
 @dataclass
@@ -107,13 +113,105 @@ class GameFactMemory:
         day_number: int,
         player_id: str,
         death_type: str,
+        player_name: Optional[str] = None,
     ) -> None:
+        display_name = player_name or player_id
         self.add_fact(GameFact(
             fact_type=FactType.DEATH,
             day_number=day_number,
             player_id=player_id,
-            content=f"Player {player_id} died ({death_type})",
-            metadata={"death_type": death_type},
+            content=f"{display_name} died ({death_type})",
+            metadata={"death_type": death_type, "player_name": player_name},
+        ))
+
+    def add_lynch(
+        self,
+        day_number: int,
+        player_id: str,
+        player_name: Optional[str] = None,
+        vote_count: Optional[float] = None,
+    ) -> None:
+        display_name = player_name or player_id
+        vote_info = f" with {vote_count} votes" if vote_count else ""
+        self.add_fact(GameFact(
+            fact_type=FactType.LYNCH,
+            day_number=day_number,
+            player_id=player_id,
+            content=f"{display_name} was lynched{vote_info}",
+            metadata={"player_name": player_name, "vote_count": vote_count},
+        ))
+
+    def add_sheriff_elected(
+        self,
+        day_number: int,
+        player_id: str,
+        player_name: Optional[str] = None,
+    ) -> None:
+        display_name = player_name or player_id
+        self.add_fact(GameFact(
+            fact_type=FactType.SHERIFF_ELECTED,
+            day_number=day_number,
+            player_id=player_id,
+            content=f"{display_name} was elected as sheriff",
+            metadata={"player_name": player_name},
+        ))
+
+    def add_badge_action(
+        self,
+        day_number: int,
+        player_id: str,
+        action: str,
+        target_id: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> None:
+        if action == "pass" and target_id:
+            display_target = target_name or target_id
+            content = f"Sheriff badge passed to {display_target}"
+        else:
+            content = "Sheriff badge was torn"
+        self.add_fact(GameFact(
+            fact_type=FactType.BADGE_ACTION,
+            day_number=day_number,
+            player_id=player_id,
+            content=content,
+            metadata={"action": action, "target_id": target_id, "target_name": target_name},
+        ))
+
+    def add_hunter_shot(
+        self,
+        day_number: int,
+        hunter_id: str,
+        target_id: str,
+        hunter_name: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> None:
+        display_hunter = hunter_name or hunter_id
+        display_target = target_name or target_id
+        self.add_fact(GameFact(
+            fact_type=FactType.HUNTER_SHOT,
+            day_number=day_number,
+            player_id=hunter_id,
+            content=f"Hunter {display_hunter} shot {display_target}",
+            metadata={"target_id": target_id, "hunter_name": hunter_name, "target_name": target_name},
+        ))
+
+    def add_night_result(
+        self,
+        day_number: int,
+        deaths: list[str],
+        death_names: Optional[list[str]] = None,
+    ) -> None:
+        if not deaths:
+            content = "No one died last night (peaceful night)"
+        else:
+            names = death_names if death_names else deaths
+            content = f"Night deaths: {', '.join(names)}"
+        self.add_fact(GameFact(
+            fact_type=FactType.NIGHT_RESULT,
+            day_number=day_number,
+            player_id="system",
+            content=content,
+            metadata={"deaths": deaths, "death_names": death_names},
         ))
 
     def add_suspicious_behavior(
@@ -157,7 +255,52 @@ class GameFactMemory:
         
         facts = self._facts if include_private else [f for f in self._facts if not f.is_private]
         if facts:
-            lines = [f"[Day {fact.day_number}] {fact.content}" for fact in facts]
+            by_day: dict[int, list[GameFact]] = {}
+            for fact in facts:
+                if fact.day_number not in by_day:
+                    by_day[fact.day_number] = []
+                by_day[fact.day_number].append(fact)
+            
+            lines = []
+            for day_num in sorted(by_day.keys()):
+                day_facts = by_day[day_num]
+                
+                key_events = [f for f in day_facts if f.fact_type in (
+                    FactType.LYNCH, FactType.SHERIFF_ELECTED,
+                    FactType.BADGE_ACTION, FactType.HUNTER_SHOT, FactType.NIGHT_RESULT,
+                    FactType.SEER_CHECK
+                )]
+                speeches = [f for f in day_facts if f.fact_type in (FactType.SPEECH_SUMMARY, FactType.SPEECH_FULL)]
+                votes = [f for f in day_facts if f.fact_type == FactType.VOTE_CAST]
+                role_claims = [f for f in day_facts if f.fact_type == FactType.ROLE_CLAIM]
+                
+                has_content = key_events or speeches or votes or role_claims
+                if not has_content:
+                    continue
+                
+                lines.append(f"=== Day {day_num} ===")
+                
+                if key_events:
+                    lines.append("[Key Events]")
+                    for fact in key_events:
+                        lines.append(f"  • {fact.content}")
+                
+                if role_claims:
+                    lines.append("[Role Claims]")
+                    for fact in role_claims:
+                        lines.append(f"  • {fact.content}")
+                
+                if speeches:
+                    lines.append("[Speeches]")
+                    for fact in speeches:
+                        speaker_name = fact.metadata.get("player_name", fact.player_id)
+                        lines.append(f"  • {speaker_name}: {fact.content}")
+                
+                if votes:
+                    lines.append("[Votes]")
+                    for fact in votes:
+                        lines.append(f"  • {fact.content}")
+            
             parts.append("[Recent Events]\n" + "\n".join(lines))
         
         return "\n\n".join(parts) if parts else "No recorded facts."
@@ -171,24 +314,78 @@ class GameFactMemory:
         old_facts = self._facts[:-keep_count]
         self._facts = self._facts[-keep_count:]
         
-        summary_parts = []
-        by_day: dict[int, list[str]] = {}
-        for fact in old_facts:
-            if fact.day_number not in by_day:
-                by_day[fact.day_number] = []
-            by_day[fact.day_number].append(fact.content)
-        
-        for day_num in sorted(by_day.keys()):
-            day_facts = by_day[day_num]
-            if len(day_facts) > 3:
-                summary_parts.append(f"Day {day_num}: {len(day_facts)} events recorded")
-            else:
-                summary_parts.extend([f"[Day {day_num}] {f}" for f in day_facts])
+        summary_parts = self._extract_key_points_from_facts(old_facts)
         
         if self._compressed_summary:
             self._compressed_summary = f"{self._compressed_summary}\n{chr(10).join(summary_parts)}"
         else:
             self._compressed_summary = "\n".join(summary_parts)
+
+    def _extract_key_points_from_facts(self, facts: list["GameFact"]) -> list[str]:
+        summary_parts = []
+        by_day: dict[int, list["GameFact"]] = {}
+        for fact in facts:
+            if fact.day_number not in by_day:
+                by_day[fact.day_number] = []
+            by_day[fact.day_number].append(fact)
+        
+        high_priority_types = {
+            FactType.LYNCH, FactType.SEER_CHECK,
+            FactType.SHERIFF_ELECTED, FactType.BADGE_ACTION, FactType.HUNTER_SHOT,
+            FactType.ROLE_CLAIM, FactType.NIGHT_RESULT
+        }
+        medium_priority_types = {
+            FactType.VOTE_CAST, FactType.SUSPICIOUS_BEHAVIOR, FactType.TRUSTED_PLAYER
+        }
+        
+        for day_num in sorted(by_day.keys()):
+            day_facts = by_day[day_num]
+            summary_parts.append(f"--- Day {day_num} Summary ---")
+            
+            high_priority = [f for f in day_facts if f.fact_type in high_priority_types]
+            for fact in high_priority:
+                summary_parts.append(f"  • {fact.content}")
+            
+            medium_priority = [f for f in day_facts if f.fact_type in medium_priority_types]
+            if medium_priority:
+                vote_targets: dict[str, int] = {}
+                for fact in medium_priority:
+                    if fact.fact_type == FactType.VOTE_CAST:
+                        target = fact.metadata.get("target_id", "")
+                        vote_targets[target] = vote_targets.get(target, 0) + 1
+                    else:
+                        summary_parts.append(f"  • {fact.content}")
+                
+                if vote_targets:
+                    top_voted = sorted(vote_targets.items(), key=lambda x: -x[1])[:3]
+                    vote_summary = ", ".join([f"{t}({c})" for t, c in top_voted])
+                    summary_parts.append(f"  • Vote distribution: {vote_summary}")
+            
+            speeches = [f for f in day_facts if f.fact_type in (FactType.SPEECH_SUMMARY, FactType.SPEECH_FULL)]
+            if speeches:
+                summary_parts.append(f"  • {len(speeches)} players spoke")
+        
+        return summary_parts
+
+    def compress_round(self, current_day: int) -> None:
+        if current_day <= 1:
+            return
+        
+        old_day_threshold = current_day - 1
+        old_facts = [f for f in self._facts if f.day_number < old_day_threshold]
+        current_facts = [f for f in self._facts if f.day_number >= old_day_threshold]
+        
+        if not old_facts:
+            return
+        
+        summary_parts = self._extract_key_points_from_facts(old_facts)
+        
+        if self._compressed_summary:
+            self._compressed_summary = f"{self._compressed_summary}\n{chr(10).join(summary_parts)}"
+        else:
+            self._compressed_summary = "\n".join(summary_parts)
+        
+        self._facts = current_facts
 
     def get_compressed_summary(self) -> str:
         return self._compressed_summary
@@ -311,10 +508,48 @@ class AgentMemory:
         day_number: int,
         player_id: str,
         speech_content: str,
+        player_name: Optional[str] = None,
     ) -> None:
-        summary = speech_content[:200] + "..." if len(speech_content) > 200 else speech_content
-        self.facts.add_speech_summary(day_number, player_id, summary)
+        if len(speech_content) > 500:
+            key_info = self._extract_speech_key_info(speech_content)
+            summary = key_info if key_info else speech_content[:300] + "..."
+        else:
+            summary = speech_content
+        
+        display_name = player_name or player_id
+        self.facts.add_fact(GameFact(
+            fact_type=FactType.SPEECH_SUMMARY,
+            day_number=day_number,
+            player_id=player_id,
+            content=summary,
+            metadata={"player_name": display_name, "full_length": len(speech_content)},
+        ))
         self._maybe_compress()
+
+    def _extract_speech_key_info(self, speech: str) -> str:
+        key_patterns = []
+        
+        accusation_keywords = ["狼人", "狼", "可疑", "怀疑", "投票", "出局", "werewolf", "wolf", "suspicious", "vote", "eliminate"]
+        claim_keywords = ["我是", "身份是", "验到", "验人", "查杀", "金水", "i am", "my role", "checked", "seer"]
+        
+        sentences = speech.replace("。", ".").replace("！", "!").replace("？", "?").split(".")
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence or len(sentence) < 5:
+                continue
+            
+            lower_sentence = sentence.lower()
+            if any(kw in lower_sentence for kw in accusation_keywords + claim_keywords):
+                key_patterns.append(sentence)
+        
+        if key_patterns:
+            result = ". ".join(key_patterns[:3])
+            if len(result) > 400:
+                result = result[:400] + "..."
+            return result
+        
+        return speech[:300] + "..." if len(speech) > 300 else speech
 
     def update_after_vote(
         self,
@@ -329,15 +564,58 @@ class AgentMemory:
         day_number: int,
         visible_events: list[dict[str, Any]],
     ) -> None:
+        deaths = []
+        death_names = []
         for event in visible_events:
             event_type = event.get("type", "")
             if event_type == "death":
-                self.facts.add_death(
-                    day_number,
-                    event.get("player_id", ""),
-                    event.get("death_type", "unknown"),
-                )
+                player_id = event.get("player_id", "")
+                player_name = event.get("player_name")
+                deaths.append(player_id)
+                death_names.append(player_name or player_id)
+        
+        self.facts.add_night_result(day_number, deaths, death_names if death_names else None)
         self._maybe_compress()
+
+    def update_after_lynch(
+        self,
+        day_number: int,
+        player_id: str,
+        player_name: Optional[str] = None,
+        vote_count: Optional[float] = None,
+    ) -> None:
+        self.facts.add_lynch(day_number, player_id, player_name, vote_count)
+
+    def update_after_sheriff_elected(
+        self,
+        day_number: int,
+        player_id: str,
+        player_name: Optional[str] = None,
+    ) -> None:
+        self.facts.add_sheriff_elected(day_number, player_id, player_name)
+
+    def update_after_badge_action(
+        self,
+        day_number: int,
+        player_id: str,
+        action: str,
+        target_id: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> None:
+        self.facts.add_badge_action(day_number, player_id, action, target_id, target_name)
+
+    def update_after_hunter_shot(
+        self,
+        day_number: int,
+        hunter_id: str,
+        target_id: str,
+        hunter_name: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> None:
+        self.facts.add_hunter_shot(day_number, hunter_id, target_id, hunter_name, target_name)
+
+    def compress_round(self, current_day: int) -> None:
+        self.facts.compress_round(current_day)
 
     def _maybe_compress(self) -> None:
         if self.facts._get_max_day_number() <= 1:

@@ -656,6 +656,58 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Corrector API Key",
         "zh": "校正器 API 密钥",
     },
+    "your_status": {
+        "en": "Your Status",
+        "zh": "你的状态",
+    },
+    "alignment": {
+        "en": "Alignment",
+        "zh": "阵营",
+    },
+    "village": {
+        "en": "Village",
+        "zh": "好人阵营",
+    },
+    "teammates": {
+        "en": "Teammates",
+        "zh": "狼队友",
+    },
+    "seer_checks": {
+        "en": "Seer Checks",
+        "zh": "查验结果",
+    },
+    "cure": {
+        "en": "Cure",
+        "zh": "解药",
+    },
+    "poison": {
+        "en": "Poison",
+        "zh": "毒药",
+    },
+    "select_target": {
+        "en": "Select Target",
+        "zh": "选择目标",
+    },
+    "make_decision": {
+        "en": "Make Decision",
+        "zh": "做出决定",
+    },
+    "enter_response": {
+        "en": "Enter Response",
+        "zh": "输入回复",
+    },
+    "enter_text": {
+        "en": "Enter your response...",
+        "zh": "输入你的回复...",
+    },
+    "teammates_suggestions": {
+        "en": "Teammates' Suggestions",
+        "zh": "队友的建议",
+    },
+    "suggests_kill": {
+        "en": "suggests killing",
+        "zh": "建议击杀",
+    },
 }
 
 

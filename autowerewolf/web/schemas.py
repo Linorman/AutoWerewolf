@@ -56,6 +56,7 @@ class GameStateResponse(BaseModel):
     sheriff_id: Optional[str] = None
     badge_torn: bool = False
     winning_team: Optional[str] = None
+    human_player_view: Optional[Dict[str, Any]] = None
 
 
 class PlayerViewResponse(BaseModel):

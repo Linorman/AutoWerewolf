@@ -228,6 +228,14 @@
                     </div>
                 </div>
 
+                <div class="human-player-panel hidden" id="human-player-panel">
+                    <div class="human-player-header">
+                        <span class="human-player-title" data-i18n="your_status">Your Status</span>
+                        <span class="human-player-role" id="human-role-display"></span>
+                    </div>
+                    <div class="human-player-info" id="human-player-info"></div>
+                </div>
+
                 <div class="player-arena" id="player-arena">
                     <div class="arena-placeholder" id="arena-placeholder">
                         <svg viewBox="0 0 100 100" fill="currentColor">
@@ -291,12 +299,20 @@
 
     <div class="action-modal hidden" id="action-modal">
         <div class="action-modal-content">
-            <h3 class="action-title" id="action-title"></h3>
+            <div class="action-modal-header">
+                <h3 class="action-title" id="action-title"></h3>
+                <div class="action-player-info" id="action-player-info"></div>
+            </div>
+            <p class="action-prompt" id="action-prompt"></p>
             <div class="action-targets" id="action-targets"></div>
+            <div class="yes-no-buttons hidden" id="yes-no-buttons">
+                <button class="btn btn-success yes-btn" onclick="submitYesNo(true)" data-i18n="yes">Yes</button>
+                <button class="btn btn-danger no-btn" onclick="submitYesNo(false)" data-i18n="no">No</button>
+            </div>
             <textarea class="action-textarea hidden" id="speech-input" placeholder=""></textarea>
-            <div class="action-buttons">
-                <button class="btn btn-secondary" onclick="skipAction()" data-i18n="skip">Skip</button>
-                <button class="btn btn-primary" onclick="submitAction()" data-i18n="submit">Submit</button>
+            <div class="action-buttons" id="action-submit-buttons">
+                <button class="btn btn-secondary hidden" id="skip-btn" onclick="skipAction()" data-i18n="skip">Skip</button>
+                <button class="btn btn-primary" id="submit-btn" onclick="submitAction()" data-i18n="submit">Submit</button>
             </div>
         </div>
     </div>

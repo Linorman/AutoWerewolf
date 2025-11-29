@@ -183,9 +183,10 @@ class BasePlayerAgent(ABC):
         day_number: int,
         player_id: str,
         speech_content: str,
+        player_name: Optional[str] = None,
     ) -> None:
         if self.memory:
-            self.memory.update_after_speech(day_number, player_id, speech_content)
+            self.memory.update_after_speech(day_number, player_id, speech_content, player_name)
 
     def update_memory_after_vote(
         self,

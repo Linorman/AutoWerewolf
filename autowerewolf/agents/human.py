@@ -1,3 +1,4 @@
+import threading
 from typing import TYPE_CHECKING, Any, Optional
 
 from autowerewolf.agents.player_base import BasePlayerAgent, GameView
@@ -83,10 +84,21 @@ class HumanPlayerAgent(BasePlayerAgent):
         valid_targets = game_view.action_context.get("valid_targets", [])
         
         if self.role == Role.WEREWOLF:
+            ai_proposals = game_view.action_context.get("ai_proposals", [])
+            teammates_info = game_view.action_context.get("teammates_info", [])
+            
+            prompt = "Choose a player to kill (or 'skip' to abstain):"
+            extra_context = {
+                "ai_proposals": ai_proposals,
+                "teammates_info": teammates_info,
+                "is_werewolf_discussion": game_view.action_context.get("is_werewolf_discussion", False),
+            }
+            
             target = self.input_handler.get_target_selection(
-                "Choose a player to kill (or 'skip' to abstain):",
+                prompt,
                 valid_targets,
                 allow_skip=True,
+                extra_context=extra_context,
             )
             return WerewolfNightOutput(
                 kill_target_id=target or valid_targets[0] if valid_targets else "",
@@ -304,30 +316,63 @@ class CLIInputHandler:
 class WebInputHandler:
     def __init__(self):
         self._pending_input: Optional[Any] = None
-        self._input_event: Optional[Any] = None
+        self._input_event = threading.Event()
+        self._action_request_callback: Optional[Any] = None
+        self._current_request: Optional[dict[str, Any]] = None
+
+    def set_action_request_callback(self, callback: Any) -> None:
+        self._action_request_callback = callback
 
     def set_input(self, data: Any) -> None:
         self._pending_input = data
-        if self._input_event:
-            self._input_event.set()
+        self._input_event.set()
 
-    def _wait_for_input_sync(self, timeout: Optional[float] = None) -> Any:
-        import time
-        start = time.time()
-        while self._pending_input is None:
-            if timeout and (time.time() - start) > timeout:
-                break
-            time.sleep(0.1)
-        result = self._pending_input
+    def _request_input(
+        self,
+        action_type: str,
+        prompt: str,
+        valid_targets: Optional[list[str]] = None,
+        allow_skip: bool = False,
+        extra_context: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self._current_request = {
+            "action_type": action_type,
+            "prompt": prompt,
+            "valid_targets": valid_targets or [],
+            "allow_skip": allow_skip,
+            "extra_context": extra_context or {},
+        }
+        if self._action_request_callback:
+            self._action_request_callback(self._current_request)
+
+    def _wait_for_input_sync(self, timeout: float = 300.0) -> Any:
+        if self._input_event.is_set() and self._pending_input is not None:
+            result = self._pending_input
+            self._pending_input = None
+            self._input_event.clear()
+            self._current_request = None
+            return result
+        self._input_event.clear()
         self._pending_input = None
-        return result
+        
+        if self._input_event.wait(timeout=timeout):
+            result = self._pending_input
+            self._pending_input = None
+            self._input_event.clear()
+            self._current_request = None
+            return result
+        
+        self._current_request = None
+        return None
 
     def get_target_selection(
         self,
         prompt: str,
         valid_targets: list[str],
         allow_skip: bool = False,
+        extra_context: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
+        self._request_input("target_selection", prompt, valid_targets, allow_skip, extra_context)
         data = self._wait_for_input_sync()
         if data is None:
             return None
@@ -336,15 +381,17 @@ class WebInputHandler:
             return None
         if target in valid_targets:
             return target
-        return None
+        return valid_targets[0] if valid_targets else None
 
     def get_yes_no(self, prompt: str) -> bool:
+        self._request_input("yes_no", prompt, allow_skip=False)
         data = self._wait_for_input_sync()
         if data is None or not isinstance(data, dict):
             return False
         return bool(data.get("value", False))
 
     def get_text_input(self, prompt: str, multiline: bool = False) -> str:
+        self._request_input("text_input", prompt, allow_skip=False, extra_context={"multiline": multiline})
         data = self._wait_for_input_sync()
         if data is None or not isinstance(data, dict):
             return ""
