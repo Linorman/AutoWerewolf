@@ -13,7 +13,9 @@ const GameState = {
     userScrolled: false,
     lastDay: 0,
     lastPhase: '',
-    activeFilters: new Set(['all'])
+    activeFilters: new Set(['all']),
+    humanPlayerView: null,
+    currentActionRequest: null
 };
 
 function initModeSelector() {
@@ -238,6 +240,12 @@ async function startGame() {
         document.getElementById('arena-placeholder').classList.add('hidden');
         document.getElementById('player-grid').classList.remove('hidden');
         
+        if (GameState.mode === 'play') {
+            document.getElementById('human-player-panel').classList.remove('hidden');
+        } else {
+            document.getElementById('human-player-panel').classList.add('hidden');
+        }
+        
         clearEventLog();
         
     } catch (e) {
@@ -264,6 +272,8 @@ async function stopGame() {
         document.getElementById('start-btn').classList.remove('hidden');
         document.getElementById('stop-btn').classList.add('hidden');
         document.getElementById('game-status-text').textContent = I18N.t('stopped', 'Stopped');
+        document.getElementById('human-player-panel').classList.add('hidden');
+        GameState.humanPlayerView = null;
         
     } catch (e) {
         console.error('Stop game error:', e);
@@ -315,7 +325,9 @@ function handleWSMessage(msg) {
             updateGameState(msg.data);
             break;
         case 'event':
-            addEvent(msg.data);
+            if (msg.data) {
+                addEvent(msg.data);
+            }
             break;
         case 'narration':
             addNarration(msg.data.content);
@@ -324,7 +336,11 @@ function handleWSMessage(msg) {
             showWinner(msg.data.winning_team);
             break;
         case 'action_request':
+            GameState.currentActionRequest = msg.data;
             showActionModal(msg.data);
+            break;
+        case 'action_response':
+            console.log('Action response:', msg.data);
             break;
         case 'error':
             console.error('Game error:', msg.data.message);
@@ -348,7 +364,122 @@ function updateGameState(state) {
     const alivePlayers = state.players.filter(p => p.is_alive);
     document.getElementById('alive-count').textContent = alivePlayers.length;
     
+    if (state.human_player_view) {
+        GameState.humanPlayerView = state.human_player_view;
+        updateHumanPlayerPanel(state.human_player_view);
+    }
+    
     renderPlayers(state.players, state.sheriff_id);
+}
+
+function updateHumanPlayerPanel(view) {
+    const panel = document.getElementById('human-player-panel');
+    const roleDisplay = document.getElementById('human-role-display');
+    const infoContainer = document.getElementById('human-player-info');
+    
+    if (!view) {
+        panel.classList.add('hidden');
+        return;
+    }
+    
+    panel.classList.remove('hidden');
+    
+    const roleText = I18N.t(view.role, view.role.replace('_', ' '));
+    const roleIcon = getRoleIcon(view.role);
+    roleDisplay.innerHTML = `${roleIcon} ${roleText}`;
+    roleDisplay.className = `human-player-role ${view.role}`;
+    
+    let infoHtml = '';
+    
+    infoHtml += `<div class="human-info-item">
+        <span class="label">${I18N.t('alignment', 'Alignment')}:</span>
+        <span class="value ${view.alignment === 'village' ? 'good' : 'evil'}">${I18N.t(view.alignment, view.alignment)}</span>
+    </div>`;
+    
+    infoHtml += `<div class="human-info-item">
+        <span class="label">${I18N.t('status', 'Status')}:</span>
+        <span class="value">${view.is_alive ? I18N.t('alive', 'Alive') : I18N.t('dead', 'Dead')}</span>
+    </div>`;
+    
+    if (view.is_sheriff) {
+        infoHtml += `<div class="human-info-item">
+            <span class="value">👑 ${I18N.t('sheriff', 'Sheriff')}</span>
+        </div>`;
+    }
+    
+    const privateInfo = view.private_info || {};
+    
+    if (privateInfo.teammates && privateInfo.teammates.length > 0) {
+        infoHtml += `<div class="human-info-item">
+            <span class="label">🐺 ${I18N.t('teammates', 'Teammates')}:</span>
+            <div class="teammate-list">`;
+        privateInfo.teammates.forEach(t => {
+            const deadClass = t.is_alive ? '' : 'dead';
+            infoHtml += `<span class="teammate-tag ${deadClass}">${escapeHtml(t.name)}</span>`;
+        });
+        infoHtml += `</div></div>`;
+    }
+    
+    if (privateInfo.check_results && privateInfo.check_results.length > 0) {
+        infoHtml += `<div class="human-info-item">
+            <span class="label">🔮 ${I18N.t('seer_checks', 'Seer Checks')}:</span>
+            <div class="teammate-list">`;
+        privateInfo.check_results.forEach(r => {
+            const resultClass = r.result === 'village' ? 'good' : 'evil';
+            const playerName = r.player_name || r.player_id;
+            infoHtml += `<span class="teammate-tag" style="background: rgba(${resultClass === 'good' ? '34,197,94' : '201,72,91'}, 0.2); color: var(--accent-${resultClass === 'good' ? 'success' : 'primary'});">${escapeHtml(playerName)}: ${I18N.t(r.result, r.result)}</span>`;
+        });
+        infoHtml += `</div></div>`;
+    }
+    
+    if (view.role === 'witch') {
+        infoHtml += `<div class="human-info-item">
+            <span class="label">💊 ${I18N.t('cure', 'Cure')}:</span>
+            <span class="value">${privateInfo.has_cure ? '✓' : '✗'}</span>
+        </div>`;
+        infoHtml += `<div class="human-info-item">
+            <span class="label">☠️ ${I18N.t('poison', 'Poison')}:</span>
+            <span class="value">${privateInfo.has_poison ? '✓' : '✗'}</span>
+        </div>`;
+        if (privateInfo.attack_target) {
+            infoHtml += `<div class="human-info-item">
+                <span class="label">⚠️ ${I18N.t('attack_target', 'Attack Target')}:</span>
+                <span class="value evil">${escapeHtml(privateInfo.attack_target.name)}</span>
+            </div>`;
+        }
+    }
+    
+    if (view.role === 'hunter') {
+        infoHtml += `<div class="human-info-item">
+            <span class="label">🔫 ${I18N.t('can_shoot', 'Can Shoot')}:</span>
+            <span class="value">${privateInfo.can_shoot ? '✓' : '✗'}</span>
+        </div>`;
+    }
+    
+    if (view.role === 'guard' && privateInfo.last_protected) {
+        const lastProtectedName = typeof privateInfo.last_protected === 'object' 
+            ? privateInfo.last_protected.name 
+            : privateInfo.last_protected;
+        infoHtml += `<div class="human-info-item">
+            <span class="label">🛡️ ${I18N.t('last_protected', 'Last Protected')}:</span>
+            <span class="value">${escapeHtml(lastProtectedName)}</span>
+        </div>`;
+    }
+    
+    infoContainer.innerHTML = infoHtml;
+}
+
+function getRoleIcon(role) {
+    const icons = {
+        'werewolf': '🐺',
+        'seer': '🔮',
+        'witch': '🧙',
+        'hunter': '🔫',
+        'guard': '🛡️',
+        'village_idiot': '🃏',
+        'villager': '👤'
+    };
+    return icons[role] || '👤';
 }
 
 function renderPlayers(players, sheriffId) {
@@ -361,12 +492,15 @@ function renderPlayers(players, sheriffId) {
         
         if (!player.is_alive) classes.push('dead');
         if (player.id === sheriffId) classes.push('sheriff');
+        if (player.is_human) classes.push('human');
+        if (player.is_teammate) classes.push('teammate');
         if (player.role === 'werewolf') classes.push('werewolf');
         else if (['seer', 'witch', 'hunter', 'guard', 'village_idiot'].includes(player.role)) {
             classes.push('special');
         }
         
         card.className = classes.join(' ');
+        card.dataset.playerId = player.id;
         
         const roleClass = player.role !== 'hidden' ? player.role : '';
         const roleDisplay = player.role !== 'hidden' 
@@ -381,9 +515,16 @@ function renderPlayers(players, sheriffId) {
             ? '<span class="sheriff-badge">👑</span>' 
             : '';
         
+        const teammateBadge = player.is_teammate
+            ? '<span class="teammate-badge">🐺</span>'
+            : '';
+        
+        const playerLabel = `Player ${player.seat_number}`;
+        
         card.innerHTML = `
             <div class="player-seat">#${player.seat_number}</div>
-            <div class="player-name">${escapeHtml(player.name)}</div>
+            <div class="player-name">${escapeHtml(player.name)}${teammateBadge}</div>
+            <div class="player-label">${playerLabel}</div>
             <div class="player-role ${roleClass}">${roleDisplay}</div>
             <div class="player-status">${statusText}${sheriffBadge}</div>
         `;
@@ -393,6 +534,10 @@ function renderPlayers(players, sheriffId) {
 }
 
 function addEvent(event) {
+    if (!event || !event.event_type) {
+        return;
+    }
+    
     const timeline = document.getElementById('event-timeline');
     const placeholder = document.getElementById('timeline-placeholder');
     if (placeholder) placeholder.remove();
@@ -543,59 +688,189 @@ function closeWinnerModal() {
 
 function showActionModal(data) {
     const modal = document.getElementById('action-modal');
-    document.getElementById('action-title').textContent = data.prompt || I18N.t('your_turn', 'Your Turn');
+    const actionType = data.action_type;
+    const prompt = data.prompt || I18N.t('your_turn', 'Your Turn');
     
-    const targets = document.getElementById('action-targets');
-    targets.innerHTML = '';
-    GameState.selectedTarget = null;
+    document.getElementById('action-title').textContent = getActionTitle(actionType);
+    document.getElementById('action-prompt').textContent = prompt;
     
-    if (data.valid_targets) {
-        data.valid_targets.forEach(target => {
-            const btn = document.createElement('div');
-            btn.className = 'action-target';
-            btn.textContent = target;
-            btn.onclick = () => {
-                document.querySelectorAll('.action-target').forEach(t => t.classList.remove('selected'));
-                btn.classList.add('selected');
-                GameState.selectedTarget = target;
-            };
-            targets.appendChild(btn);
-        });
+    const playerInfo = document.getElementById('action-player-info');
+    if (data.player_info && data.player_info.role) {
+        playerInfo.textContent = `${getRoleIcon(data.player_info.role)} ${I18N.t(data.player_info.role, data.player_info.role)}`;
+        playerInfo.classList.remove('hidden');
+    } else {
+        playerInfo.classList.add('hidden');
     }
     
+    const targets = document.getElementById('action-targets');
+    const yesNoButtons = document.getElementById('yes-no-buttons');
     const speechInput = document.getElementById('speech-input');
-    if (data.action_type === 'speech') {
-        speechInput.classList.remove('hidden');
-        speechInput.placeholder = I18N.t('enter_speech', 'Enter your speech...');
+    const submitButtons = document.getElementById('action-submit-buttons');
+    const skipBtn = document.getElementById('skip-btn');
+    
+    targets.innerHTML = '';
+    GameState.selectedTarget = null;
+    yesNoButtons.classList.add('hidden');
+    speechInput.classList.add('hidden');
+    submitButtons.classList.remove('hidden');
+    
+    let discussionContainer = document.getElementById('werewolf-discussion');
+    if (discussionContainer) {
+        discussionContainer.remove();
+    }
+    
+    if (data.allow_skip) {
+        skipBtn.classList.remove('hidden');
     } else {
-        speechInput.classList.add('hidden');
+        skipBtn.classList.add('hidden');
+    }
+    
+    if (actionType === 'yes_no') {
+        yesNoButtons.classList.remove('hidden');
+        submitButtons.classList.add('hidden');
+    } else if (actionType === 'text_input') {
+        speechInput.classList.remove('hidden');
+        speechInput.value = '';
+        speechInput.placeholder = I18N.t('enter_text', 'Enter your response...');
+        if (data.extra_context && data.extra_context.multiline) {
+            speechInput.rows = 4;
+        } else {
+            speechInput.rows = 2;
+        }
+    } else if (actionType === 'target_selection') {
+        const extraContext = data.extra_context || {};
+        const aiProposals = extraContext.ai_proposals || [];
+        
+        if (extraContext.is_werewolf_discussion && aiProposals.length > 0) {
+            discussionContainer = document.createElement('div');
+            discussionContainer.id = 'werewolf-discussion';
+            discussionContainer.className = 'werewolf-discussion';
+            
+            let discussionHtml = `<div class="discussion-header">🐺 ${I18N.t('teammates_suggestions', 'Teammates\' Suggestions')}</div>`;
+            discussionHtml += '<div class="discussion-list">';
+            
+            aiProposals.forEach(proposal => {
+                const targetName = proposal.proposed_target_name || proposal.proposed_target;
+                discussionHtml += `
+                    <div class="discussion-item">
+                        <div class="discussion-wolf">${escapeHtml(proposal.werewolf_name)}</div>
+                        <div class="discussion-target">${I18N.t('suggests_kill', 'suggests killing')} <strong>${escapeHtml(targetName)}</strong></div>
+                        <div class="discussion-reason">${escapeHtml(proposal.reasoning)}</div>
+                    </div>
+                `;
+            });
+            
+            discussionHtml += '</div>';
+            discussionContainer.innerHTML = discussionHtml;
+            
+            const actionPrompt = document.getElementById('action-prompt');
+            actionPrompt.parentNode.insertBefore(discussionContainer, actionPrompt.nextSibling);
+        }
+        
+        const targetInfoList = data.valid_targets_info || [];
+        const targetIds = data.valid_targets || [];
+        
+        if (targetInfoList.length > 0) {
+            targetInfoList.forEach(targetInfo => {
+                const btn = document.createElement('div');
+                btn.className = 'action-target';
+                const playerLabel = `Player ${targetInfo.seat_number}`;
+                btn.innerHTML = `<span class="target-seat">#${targetInfo.seat_number}</span><span class="target-name">${escapeHtml(targetInfo.name)}</span><span class="target-label">(${playerLabel})</span>`;
+                btn.dataset.targetId = targetInfo.id;
+                btn.onclick = () => {
+                    document.querySelectorAll('.action-target').forEach(t => t.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    GameState.selectedTarget = targetInfo.id;
+                };
+                targets.appendChild(btn);
+            });
+        } else if (targetIds.length > 0) {
+            targetIds.forEach(target => {
+                const btn = document.createElement('div');
+                btn.className = 'action-target';
+                btn.textContent = target;
+                btn.onclick = () => {
+                    document.querySelectorAll('.action-target').forEach(t => t.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    GameState.selectedTarget = target;
+                };
+                targets.appendChild(btn);
+            });
+        }
     }
     
     modal.classList.remove('hidden');
 }
 
+function getActionTitle(actionType) {
+    const titles = {
+        'target_selection': I18N.t('select_target', 'Select Target'),
+        'yes_no': I18N.t('make_decision', 'Make Decision'),
+        'text_input': I18N.t('enter_response', 'Enter Response'),
+    };
+    return titles[actionType] || I18N.t('your_turn', 'Your Turn');
+}
+
 function submitAction() {
     if (!GameState.ws || GameState.ws.readyState !== WebSocket.OPEN) return;
+    
+    const currentRequest = GameState.currentActionRequest;
+    const actionType = currentRequest ? currentRequest.action_type : 'submit';
     
     const action = {
         type: 'action',
         data: {
-            action_type: 'submit',
+            action_type: actionType,
             target_id: GameState.selectedTarget,
             content: document.getElementById('speech-input').value,
+            extra_data: {
+                target: GameState.selectedTarget,
+                text: document.getElementById('speech-input').value,
+            }
         }
     };
     
     GameState.ws.send(JSON.stringify(action));
     document.getElementById('action-modal').classList.add('hidden');
     document.getElementById('speech-input').value = '';
+    GameState.currentActionRequest = null;
+}
+
+function submitYesNo(value) {
+    if (!GameState.ws || GameState.ws.readyState !== WebSocket.OPEN) return;
+    
+    const action = {
+        type: 'action',
+        data: {
+            action_type: 'yes_no',
+            extra_data: {
+                value: value
+            }
+        }
+    };
+    
+    GameState.ws.send(JSON.stringify(action));
+    document.getElementById('action-modal').classList.add('hidden');
+    GameState.currentActionRequest = null;
 }
 
 function skipAction() {
     if (!GameState.ws || GameState.ws.readyState !== WebSocket.OPEN) return;
     
-    GameState.ws.send(JSON.stringify({ type: 'action', data: { action_type: 'skip' } }));
+    const action = {
+        type: 'action',
+        data: {
+            action_type: 'skip',
+            target_id: null,
+            extra_data: {
+                target: 'skip'
+            }
+        }
+    };
+    
+    GameState.ws.send(JSON.stringify(action));
     document.getElementById('action-modal').classList.add('hidden');
+    GameState.currentActionRequest = null;
 }
 
 function escapeHtml(text) {
@@ -725,5 +1000,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.closeWinnerModal = closeWinnerModal;
 window.submitAction = submitAction;
+window.submitYesNo = submitYesNo;
 window.skipAction = skipAction;
 

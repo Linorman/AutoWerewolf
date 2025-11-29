@@ -341,6 +341,20 @@ async def game_websocket(websocket: WebSocket, game_id: str):
                         data={"message": message},
                     ))
                 
+                elif event_type == "action_request":
+                    await ws_manager.send_to(websocket, WSMessage(
+                        type=WSMessageType.ACTION_REQUEST,
+                        data={
+                            "action_type": realtime_event.get("action_type"),
+                            "prompt": realtime_event.get("prompt"),
+                            "valid_targets": realtime_event.get("valid_targets", []),
+                            "valid_targets_info": realtime_event.get("valid_targets_info", []),
+                            "allow_skip": realtime_event.get("allow_skip", False),
+                            "extra_context": realtime_event.get("extra_context", {}),
+                            "player_info": realtime_event.get("player_info", {}),
+                        },
+                    ))
+                
                 realtime_event = session.get_realtime_event(timeout=0.01)
             
             if session.status in ("completed", "error", "stopped"):

@@ -244,8 +244,9 @@ class TestAgentMemory:
         ]
         memory.update_after_night(1, events)
         
-        facts = memory.facts.get_facts(fact_type=FactType.DEATH)
+        facts = memory.facts.get_facts(fact_type=FactType.NIGHT_RESULT)
         assert len(facts) == 1
+        assert "p5" in facts[0].content
 
     def test_to_context_string(self):
         memory = AgentMemory("p1")

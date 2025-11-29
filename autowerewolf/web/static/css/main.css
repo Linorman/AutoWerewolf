@@ -543,8 +543,14 @@ body {
 .player-name {
     font-weight: 600;
     font-size: 14px;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     color: var(--text-primary);
+}
+
+.player-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
 }
 
 .player-role {
@@ -866,7 +872,10 @@ body {
 }
 
 .action-target {
-    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
     border: 2px solid var(--border-color);
@@ -878,12 +887,40 @@ body {
 
 .action-target:hover {
     border-color: var(--accent-primary);
+    background: var(--bg-hover);
 }
 
 .action-target.selected {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
     color: white;
+}
+
+.action-target .target-name {
+    font-weight: 600;
+}
+
+.action-target .target-seat {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+}
+
+.action-target.selected .target-seat {
+    color: rgba(255,255,255,0.8);
+    background: rgba(0,0,0,0.2);
+}
+
+.action-target .target-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.action-target.selected .target-label {
+    color: rgba(255,255,255,0.7);
 }
 
 .action-textarea {
@@ -909,6 +946,229 @@ body {
     flex-direction: row;
     justify-content: flex-end;
     margin-top: 0;
+}
+
+.human-player-panel {
+    background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+    border-bottom: 2px solid var(--accent-primary);
+    padding: 12px 24px;
+}
+
+.human-player-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.human-player-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+.human-player-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.human-player-role.werewolf {
+    background: linear-gradient(135deg, var(--accent-primary), #a83a4a);
+    color: white;
+}
+
+.human-player-role.seer,
+.human-player-role.witch,
+.human-player-role.hunter,
+.human-player-role.guard {
+    background: linear-gradient(135deg, var(--accent-secondary), #7c3aed);
+    color: white;
+}
+
+.human-player-role.village_idiot {
+    background: linear-gradient(135deg, var(--accent-warning), #d97706);
+    color: #000;
+}
+
+.human-player-role.villager {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    color: var(--text-primary);
+}
+
+.human-player-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 13px;
+}
+
+.human-info-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+}
+
+.human-info-item .label {
+    color: var(--text-muted);
+}
+
+.human-info-item .value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.human-info-item .value.good {
+    color: var(--accent-success);
+}
+
+.human-info-item .value.evil {
+    color: var(--accent-primary);
+}
+
+.teammate-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.teammate-tag {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    background: rgba(201, 72, 91, 0.2);
+    color: var(--accent-primary);
+}
+
+.teammate-tag.dead {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.action-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.action-player-info {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+}
+
+.action-prompt {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+.yes-no-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.yes-no-buttons .btn {
+    flex: 1;
+    padding: 14px 24px;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, var(--accent-success) 0%, #16a34a 100%);
+    color: white;
+}
+
+.btn-success:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3);
+}
+
+.player-card.human {
+    border-color: var(--accent-info);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
+}
+
+.player-card.human::after {
+    content: '👤';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 12px;
+}
+
+.player-card.teammate {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 15px rgba(201, 72, 91, 0.3);
+}
+
+.teammate-badge {
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.werewolf-discussion {
+    background: rgba(201, 72, 91, 0.1);
+    border: 1px solid rgba(201, 72, 91, 0.3);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.discussion-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(201, 72, 91, 0.2);
+}
+
+.discussion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.discussion-item {
+    background: var(--bg-tertiary);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+}
+
+.discussion-wolf {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    margin-bottom: 4px;
+}
+
+.discussion-target {
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.discussion-target strong {
+    color: var(--accent-warning);
+}
+
+.discussion-reason {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 ::-webkit-scrollbar {

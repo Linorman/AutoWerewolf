@@ -20,6 +20,7 @@ from autowerewolf.agents.player_base import (
     GameView,
     create_player_agent,
 )
+from autowerewolf.agents.roles.hunter import HunterAgent
 from autowerewolf.agents.roles.werewolf import WerewolfAgent, WerewolfDiscussionChain
 from autowerewolf.agents.schemas import (
     BadgeDecisionOutput,
@@ -58,6 +59,7 @@ from autowerewolf.engine.state import (
     Action,
     DeathAnnouncementEvent,
     Event,
+    EventType,
     GameConfig,
     GameState,
     GuardProtectAction,
@@ -322,8 +324,10 @@ class GameOrchestrator:
         content: str,
     ) -> None:
         day_number = state.game_state.day_number
+        speaker = state.game_state.get_player(speaker_id)
+        speaker_name = speaker.name if speaker else None
         for agent in state.agents.values():
-            agent.update_memory_after_speech(day_number, speaker_id, content)
+            agent.update_memory_after_speech(day_number, speaker_id, content, speaker_name)
 
     def _update_all_agents_memory_after_vote(
         self,
@@ -341,13 +345,83 @@ class GameOrchestrator:
         events: list[Event],
     ) -> None:
         day_number = state.game_state.day_number
-        visible_events = [
-            {"type": "death", "player_id": e.target_id, "death_type": e.event_type.value}
-            for e in events
-            if e.event_type.value == "death_announcement" and e.target_id
-        ]
+        visible_events = []
+        for e in events:
+            if e.event_type.value == "death_announcement" and e.target_id:
+                player = state.game_state.get_player(e.target_id)
+                visible_events.append({
+                    "type": "death",
+                    "player_id": e.target_id,
+                    "player_name": player.name if player else None,
+                    "death_type": e.event_type.value,
+                })
         for agent in state.agents.values():
             agent.update_memory_after_night(day_number, visible_events)
+
+    def _update_all_agents_memory_after_lynch(
+        self,
+        state: OrchestratorState,
+        player_id: str,
+        vote_count: Optional[float] = None,
+    ) -> None:
+        day_number = state.game_state.day_number
+        player = state.game_state.get_player(player_id)
+        player_name = player.name if player else None
+        for agent in state.agents.values():
+            if agent.memory:
+                agent.memory.update_after_lynch(day_number, player_id, player_name, vote_count)
+
+    def _update_all_agents_memory_after_sheriff(
+        self,
+        state: OrchestratorState,
+        player_id: str,
+    ) -> None:
+        day_number = state.game_state.day_number
+        player = state.game_state.get_player(player_id)
+        player_name = player.name if player else None
+        for agent in state.agents.values():
+            if agent.memory:
+                agent.memory.update_after_sheriff_elected(day_number, player_id, player_name)
+
+    def _update_all_agents_memory_after_badge_action(
+        self,
+        state: OrchestratorState,
+        sheriff_id: str,
+        action: str,
+        target_id: Optional[str] = None,
+    ) -> None:
+        day_number = state.game_state.day_number
+        target_name = None
+        if target_id:
+            target = state.game_state.get_player(target_id)
+            target_name = target.name if target else None
+        for agent in state.agents.values():
+            if agent.memory:
+                agent.memory.update_after_badge_action(day_number, sheriff_id, action, target_id, target_name)
+
+    def _update_all_agents_memory_after_hunter_shot(
+        self,
+        state: OrchestratorState,
+        hunter_id: str,
+        target_id: str,
+    ) -> None:
+        day_number = state.game_state.day_number
+        hunter = state.game_state.get_player(hunter_id)
+        target = state.game_state.get_player(target_id)
+        hunter_name = hunter.name if hunter else None
+        target_name = target.name if target else None
+        for agent in state.agents.values():
+            if agent.memory:
+                agent.memory.update_after_hunter_shot(day_number, hunter_id, target_id, hunter_name, target_name)
+
+    def _compress_all_agents_memory(
+        self,
+        state: OrchestratorState,
+    ) -> None:
+        current_day = state.game_state.day_number
+        for agent in state.agents.values():
+            if agent.memory:
+                agent.memory.compress_round(current_day)
 
     def build_game_view(
         self,
@@ -487,35 +561,11 @@ class GameOrchestrator:
 
         discussions: list[dict[str, Any]] = []
         target_votes: dict[str, int] = {}
-        
-        if human_wolf_agent and human_wolf_id:
-            try:
-                game_view = self.build_game_view(
-                    state.game_state,
-                    human_wolf_id,
-                    {
-                        "valid_targets": valid_targets,
-                        "teammates": [w.id for w in wolves if w.id != human_wolf_id],
-                    },
-                )
-                result = human_wolf_agent.decide_night_action(game_view)
-                
-                if isinstance(result, WerewolfNightOutput):
-                    human_wolf_player = state.game_state.get_player(human_wolf_id)
-                    discussions.append({
-                        "werewolf_id": human_wolf_id,
-                        "werewolf_name": human_wolf_player.name if human_wolf_player else human_wolf_id,
-                        "proposed_target": result.kill_target_id,
-                        "reasoning": "Human player choice",
-                    })
-                    if result.kill_target_id in valid_targets:
-                        target_votes[result.kill_target_id] = target_votes.get(result.kill_target_id, 0) + 1
-            except Exception as e:
-                logger.warning(f"Human werewolf action failed: {e}")
+        ai_proposals: list[dict[str, Any]] = []
         
         if werewolf_agents:
             try:
-                lead_wolf = wolves[0]
+                lead_wolf = wolves[0] if not human_wolf_id else wolves[0] if wolves[0].id != human_wolf_id else (wolves[1] if len(wolves) > 1 else wolves[0])
                 chat_model = werewolf_agents[0].chat_model
                 discussion_chain = WerewolfDiscussionChain(
                     werewolf_agents=werewolf_agents,
@@ -535,12 +585,16 @@ class GameOrchestrator:
                 proposals = discussion_chain.get_proposals(game_view)
                 for wolf_id, proposal in proposals:
                     wolf_player = state.game_state.get_player(wolf_id)
-                    discussions.append({
+                    target_player = state.game_state.get_player(proposal.target_player_id)
+                    proposal_info = {
                         "werewolf_id": wolf_id,
                         "werewolf_name": wolf_player.name if wolf_player else wolf_id,
                         "proposed_target": proposal.target_player_id,
+                        "proposed_target_name": target_player.name if target_player else proposal.target_player_id,
                         "reasoning": proposal.reasoning,
-                    })
+                    }
+                    discussions.append(proposal_info)
+                    ai_proposals.append(proposal_info)
                     if proposal.target_player_id in valid_targets:
                         target_votes[proposal.target_player_id] = target_votes.get(proposal.target_player_id, 0) + 1
 
@@ -554,6 +608,56 @@ class GameOrchestrator:
 
             except Exception as e:
                 logger.warning(f"Werewolf discussion failed: {e}")
+        
+        if human_wolf_agent and human_wolf_id:
+            try:
+                teammates_info = []
+                for w in wolves:
+                    if w.id != human_wolf_id:
+                        teammates_info.append({
+                            "id": w.id,
+                            "name": w.name,
+                            "is_alive": w.is_alive,
+                        })
+                
+                valid_targets_info = []
+                for target_id in valid_targets:
+                    target_player = state.game_state.get_player(target_id)
+                    if target_player:
+                        valid_targets_info.append({
+                            "id": target_id,
+                            "name": target_player.name,
+                            "seat_number": target_player.seat_number,
+                        })
+                
+                game_view = self.build_game_view(
+                    state.game_state,
+                    human_wolf_id,
+                    {
+                        "valid_targets": valid_targets,
+                        "valid_targets_info": valid_targets_info,
+                        "teammates": [w.id for w in wolves if w.id != human_wolf_id],
+                        "teammates_info": teammates_info,
+                        "ai_proposals": ai_proposals,
+                        "is_werewolf_discussion": True,
+                    },
+                )
+                result = human_wolf_agent.decide_night_action(game_view)
+                
+                if isinstance(result, WerewolfNightOutput):
+                    human_wolf_player = state.game_state.get_player(human_wolf_id)
+                    target_player = state.game_state.get_player(result.kill_target_id)
+                    discussions.append({
+                        "werewolf_id": human_wolf_id,
+                        "werewolf_name": human_wolf_player.name if human_wolf_player else human_wolf_id,
+                        "proposed_target": result.kill_target_id,
+                        "proposed_target_name": target_player.name if target_player else result.kill_target_id,
+                        "reasoning": "Human player choice",
+                    })
+                    if result.kill_target_id in valid_targets:
+                        target_votes[result.kill_target_id] = target_votes.get(result.kill_target_id, 0) + 1
+            except Exception as e:
+                logger.warning(f"Human werewolf action failed: {e}")
 
         # Determine consensus target by voting
         if target_votes:
@@ -831,6 +935,9 @@ class GameOrchestrator:
         state.game_state = new_game_state
         self._add_events_to_buffer(state, events)
 
+        if new_game_state.sheriff_id:
+            self._update_all_agents_memory_after_sheriff(state, new_game_state.sheriff_id)
+
         return state
 
     def _build_speech_context(
@@ -1075,12 +1182,13 @@ class GameOrchestrator:
             )
 
         if vote_result.lynched_player_id:
-            state = self._handle_lynch(state, vote_result.lynched_player_id)
+            vote_count = vote_result.vote_counts.get(vote_result.lynched_player_id)
+            state = self._handle_lynch(state, vote_result.lynched_player_id, vote_count)
 
         return state
 
     def _handle_lynch(
-        self, state: OrchestratorState, lynched_player_id: str
+        self, state: OrchestratorState, lynched_player_id: str, vote_count: Optional[float] = None
     ) -> OrchestratorState:
         lynched = state.game_state.get_player(lynched_player_id)
         was_sheriff = lynched.is_sheriff if lynched else False
@@ -1095,6 +1203,8 @@ class GameOrchestrator:
             return state
 
         if lynched and not lynched.is_alive:
+            self._update_all_agents_memory_after_lynch(state, lynched_player_id, vote_count)
+            
             if self._game_logger:
                 self._game_logger.log_death(
                     lynched.id,
@@ -1184,6 +1294,8 @@ class GameOrchestrator:
             try:
                 if isinstance(agent, HumanPlayerAgent):
                     raw_result = agent.decide_hunter_shot(game_view)
+                elif isinstance(agent, HunterAgent):
+                    raw_result = agent.decide_shoot(game_view)
                 else:
                     raw_result = agent.decide_night_action(game_view)
                 if isinstance(raw_result, HunterShootOutput):
@@ -1200,6 +1312,8 @@ class GameOrchestrator:
                 new_game_state, events = resolve_hunter_shot(state.game_state, action)
                 state.game_state = new_game_state
                 self._add_events_to_buffer(state, events)
+                
+                self._update_all_agents_memory_after_hunter_shot(state, hunter_id, target_id)
                 
                 target = state.game_state.get_player(target_id)
                 if target and self._game_logger:
@@ -1240,8 +1354,10 @@ class GameOrchestrator:
                         actor_id=sheriff_id,
                         target_id=result.target_player_id,
                     )
+                    self._update_all_agents_memory_after_badge_action(state, sheriff_id, "pass", result.target_player_id)
                 else:
                     action = TearBadgeAction(actor_id=sheriff_id)
+                    self._update_all_agents_memory_after_badge_action(state, sheriff_id, "tear")
 
                 new_game_state, events = resolve_badge_action(state.game_state, action)
                 state.game_state = new_game_state
@@ -1313,6 +1429,8 @@ class GameOrchestrator:
         state = self._run_day_vote(state)
 
         state.game_state = update_win_condition(state.game_state)
+
+        self._compress_all_agents_memory(state)
 
         return state
 
@@ -1480,6 +1598,15 @@ class GameOrchestrator:
             self._batch_executor = self._create_batch_executor()
         
         self._init_logging(self._game_state)
+
+        game_start_event = Event(
+            event_type=EventType.GAME_START,
+            day_number=0,
+            phase=Phase.NIGHT,
+            data={"num_players": len(self._game_state.players)},
+            public=True,
+        )
+        self._emit_event(game_start_event, self._game_state)
 
         initial_state = OrchestratorState(
             game_state=self._game_state,

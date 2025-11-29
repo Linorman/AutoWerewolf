@@ -91,7 +91,8 @@ Remember: Only ONE potion can be used per night."""),
     ) -> WitchNightOutput:
         context = game_view.to_prompt_context()
         potion_status = self.get_potion_status()
-        attack_info = attack_target if attack_target else "No one was attacked"
+        actual_target = attack_target or game_view.action_context.get("attack_target")
+        attack_info = actual_target if actual_target else "No one was attacked"
         return self._invoke_with_correction(
             self.night_chain,
             {

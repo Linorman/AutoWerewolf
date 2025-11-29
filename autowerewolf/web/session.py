@@ -115,6 +115,19 @@ class GameSession:
             self.events.append(event)
             self.game_state = game_state
         
+        human_player_id = self._human_agent.player_id if self._human_agent else None
+        
+        if self.mode == GameMode.PLAY and human_player_id:
+            if not event.public:
+                if event.visible_to is None or human_player_id not in event.visible_to:
+                    state_response = self._build_state_response_from_game_state(game_state)
+                    self._realtime_event_queue.put({
+                        "type": "event",
+                        "event": None,
+                        "state": state_response,
+                    })
+                    return
+        
         actor_name = None
         target_name = None
         if event.actor_id:
@@ -158,13 +171,67 @@ class GameSession:
             "content": narration,
         })
 
+    def _on_action_request(self, request: Dict[str, Any]) -> None:
+        player_info = {}
+        if self._human_agent and self.game_state:
+            player = self.game_state.get_player(self._human_agent.player_id)
+            if player:
+                player_info = {
+                    "player_id": player.id,
+                    "player_name": player.name,
+                    "role": player.role.value,
+                    "is_alive": player.is_alive,
+                    "is_sheriff": player.is_sheriff,
+                }
+        
+        valid_targets_raw = request.get("valid_targets", [])
+        valid_targets_with_info = []
+        if self.game_state:
+            for target_id in valid_targets_raw:
+                target_player = self.game_state.get_player(target_id)
+                if target_player:
+                    valid_targets_with_info.append({
+                        "id": target_id,
+                        "name": target_player.name,
+                        "seat_number": target_player.seat_number,
+                        "is_alive": target_player.is_alive,
+                    })
+                else:
+                    valid_targets_with_info.append({
+                        "id": target_id,
+                        "name": target_id,
+                        "seat_number": 0,
+                        "is_alive": True,
+                    })
+        
+        self._realtime_event_queue.put({
+            "type": "action_request",
+            "action_type": request.get("action_type"),
+            "prompt": request.get("prompt"),
+            "valid_targets": valid_targets_raw,
+            "valid_targets_info": valid_targets_with_info,
+            "allow_skip": request.get("allow_skip", False),
+            "extra_context": request.get("extra_context", {}),
+            "player_info": player_info,
+        })
+
     def _build_state_response_from_game_state(self, state: GameState) -> Optional[Dict[str, Any]]:
         if state is None:
             return None
         
+        human_player_id = self._human_agent.player_id if self._human_agent else None
+        human_player = state.get_player(human_player_id) if human_player_id else None
+        human_is_werewolf = human_player and human_player.role == Role.WEREWOLF
+        
+        werewolf_ids = set()
+        if human_is_werewolf:
+            werewolf_ids = {w.id for w in state.get_werewolves()}
+        
         players_data = []
         for p in state.players:
-            role_visible = self.mode == GameMode.WATCH or self.status == "completed"
+            is_human_player = human_player_id and p.id == human_player_id
+            is_werewolf_teammate = human_is_werewolf and p.id in werewolf_ids
+            role_visible = self.mode == GameMode.WATCH or self.status == "completed" or is_human_player or is_werewolf_teammate
             players_data.append({
                 "id": p.id,
                 "name": p.name,
@@ -173,11 +240,17 @@ class GameSession:
                 "is_sheriff": p.is_sheriff,
                 "role": p.role.value if role_visible else "hidden",
                 "alignment": p.alignment.value if role_visible else "hidden",
+                "is_human": is_human_player,
+                "is_teammate": is_werewolf_teammate and not is_human_player,
             })
         
         winning = None
         if state.winning_team != WinningTeam.NONE:
             winning = state.winning_team.value
+        
+        human_player_view = None
+        if self.mode == GameMode.PLAY and human_player_id:
+            human_player_view = self._get_human_player_view(state, human_player_id)
         
         return {
             "game_id": self.game_id,
@@ -188,6 +261,7 @@ class GameSession:
             "sheriff_id": state.sheriff_id,
             "badge_torn": state.badge_torn,
             "winning_team": winning,
+            "human_player_view": human_player_view,
         }
 
     def get_realtime_event(self, timeout: float = 0.1) -> Optional[Dict[str, Any]]:
@@ -242,6 +316,7 @@ class GameSession:
                 from autowerewolf.engine.roles import Role
                 
                 self._human_input_handler = WebInputHandler()
+                self._human_input_handler.set_action_request_callback(self._on_action_request)
                 self._human_agent = HumanPlayerAgent(
                     player_id="",
                     player_name=self.player_name,
@@ -322,9 +397,19 @@ class GameSession:
         if state is None:
             return None
         
+        human_player_id = self._human_agent.player_id if self._human_agent else None
+        human_player = state.get_player(human_player_id) if human_player_id else None
+        human_is_werewolf = human_player and human_player.role == Role.WEREWOLF
+        
+        werewolf_ids = set()
+        if human_is_werewolf:
+            werewolf_ids = {w.id for w in state.get_werewolves()}
+        
         players_data = []
         for p in state.players:
-            role_visible = self.mode == GameMode.WATCH or self.status == "completed"
+            is_human_player = human_player_id and p.id == human_player_id
+            is_werewolf_teammate = human_is_werewolf and p.id in werewolf_ids
+            role_visible = self.mode == GameMode.WATCH or self.status == "completed" or is_human_player or is_werewolf_teammate
             players_data.append({
                 "id": p.id,
                 "name": p.name,
@@ -333,11 +418,17 @@ class GameSession:
                 "is_sheriff": p.is_sheriff,
                 "role": p.role.value if role_visible else "hidden",
                 "alignment": p.alignment.value if role_visible else "hidden",
+                "is_human": is_human_player,
+                "is_teammate": is_werewolf_teammate and not is_human_player,
             })
         
         winning = None
         if state.winning_team != WinningTeam.NONE:
             winning = state.winning_team.value
+        
+        human_player_view = None
+        if self.mode == GameMode.PLAY and human_player_id:
+            human_player_view = self._get_human_player_view(state, human_player_id)
         
         return GameStateResponse(
             game_id=self.game_id,
@@ -348,7 +439,61 @@ class GameSession:
             sheriff_id=state.sheriff_id,
             badge_torn=state.badge_torn,
             winning_team=winning,
+            human_player_view=human_player_view,
         )
+
+    def _get_human_player_view(self, state: GameState, player_id: str) -> Optional[Dict[str, Any]]:
+        player = state.get_player(player_id)
+        if not player:
+            return None
+        
+        private_info: Dict[str, Any] = {}
+        if player.role == Role.WEREWOLF:
+            wolves = state.get_werewolves()
+            private_info["teammates"] = [
+                {"id": w.id, "name": w.name, "is_alive": w.is_alive}
+                for w in wolves if w.id != player_id
+            ]
+        elif player.role == Role.SEER:
+            check_results = []
+            for pid, align in player.seer_checks:
+                checked_player = state.get_player(pid)
+                check_results.append({
+                    "player_id": pid,
+                    "player_name": checked_player.name if checked_player else pid,
+                    "result": align.value,
+                })
+            private_info["check_results"] = check_results
+        elif player.role == Role.WITCH:
+            private_info["has_cure"] = player.witch_has_cure
+            private_info["has_poison"] = player.witch_has_poison
+            if state.wolf_kill_target_id and state.phase.value == "night":
+                target = state.get_player(state.wolf_kill_target_id)
+                if target:
+                    private_info["attack_target"] = {"id": target.id, "name": target.name}
+        elif player.role == Role.GUARD:
+            if player.guard_last_protected:
+                last_protected_player = state.get_player(player.guard_last_protected)
+                private_info["last_protected"] = {
+                    "id": player.guard_last_protected,
+                    "name": last_protected_player.name if last_protected_player else player.guard_last_protected,
+                }
+            else:
+                private_info["last_protected"] = None
+        elif player.role == Role.HUNTER:
+            private_info["can_shoot"] = player.hunter_can_shoot
+        elif player.role == Role.VILLAGE_IDIOT:
+            private_info["revealed"] = player.village_idiot_revealed
+        
+        return {
+            "player_id": player_id,
+            "player_name": player.name,
+            "role": player.role.value,
+            "alignment": player.alignment.value,
+            "is_alive": player.is_alive,
+            "is_sheriff": player.is_sheriff,
+            "private_info": private_info,
+        }
 
     def get_player_view(self, player_id: str) -> Optional[PlayerViewResponse]:
         with self._lock:
@@ -369,15 +514,27 @@ class GameSession:
                 for w in wolves if w.id != player_id
             ]
         elif player.role == Role.SEER:
-            private_info["check_results"] = [
-                {"player_id": pid, "result": align.value}
-                for pid, align in player.seer_checks
-            ]
+            check_results = []
+            for pid, align in player.seer_checks:
+                checked_player = state.get_player(pid)
+                check_results.append({
+                    "player_id": pid,
+                    "player_name": checked_player.name if checked_player else pid,
+                    "result": align.value,
+                })
+            private_info["check_results"] = check_results
         elif player.role == Role.WITCH:
             private_info["has_cure"] = player.witch_has_cure
             private_info["has_poison"] = player.witch_has_poison
         elif player.role == Role.GUARD:
-            private_info["last_protected"] = player.guard_last_protected
+            if player.guard_last_protected:
+                last_protected_player = state.get_player(player.guard_last_protected)
+                private_info["last_protected"] = {
+                    "id": player.guard_last_protected,
+                    "name": last_protected_player.name if last_protected_player else player.guard_last_protected,
+                }
+            else:
+                private_info["last_protected"] = None
         elif player.role == Role.HUNTER:
             private_info["can_shoot"] = player.hunter_can_shoot
         elif player.role == Role.VILLAGE_IDIOT:
@@ -403,7 +560,14 @@ class GameSession:
             events_to_process = self.events[start_index:] if self.events else []
             state = self.game_state
         
+        human_player_id = self._human_agent.player_id if self._human_agent else None
+        
         for event in events_to_process:
+            if self.mode == GameMode.PLAY and human_player_id:
+                if not event.public:
+                    if event.visible_to is None or human_player_id not in event.visible_to:
+                        continue
+            
             actor_name = None
             target_name = None
             
@@ -499,11 +663,12 @@ class GameSession:
         if self._human_input_handler:
             data = {
                 "action_type": action.action_type,
-                "target": action.target_id,
-                "text": action.content,
+                "target": action.target_id or action.extra_data.get("target"),
+                "text": action.content or action.extra_data.get("text", ""),
                 "value": action.extra_data.get("value"),
             }
             self._human_input_handler.set_input(data)
+            logger.info(f"Human action submitted: {data}")
             return {"success": True, "message": "Action submitted"}
         
         return {"success": False, "message": "No human player in this game"}
