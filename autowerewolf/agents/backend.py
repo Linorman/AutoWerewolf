@@ -66,21 +66,27 @@ def _get_api_model(config: ModelConfig) -> "BaseChatModel":
                 "Install with: pip install langchain-openai"
             )
 
+    # Beta models (gpt-5.1, o1, o3, etc.)
+    beta_model_prefixes = ("gpt-5", "o1", "o3")
+    is_beta_model = config.skip_sampling_params or config.model_name.lower().startswith(beta_model_prefixes)
+
     kwargs = {
         "model": config.model_name,
-        "temperature": config.temperature,
         "max_tokens": config.max_tokens,
         "request_timeout": config.timeout_s,
     }
+
+    # Only add sampling parameters for non-beta models
+    if not is_beta_model:
+        kwargs["temperature"] = config.temperature
+        if config.top_p is not None:
+            kwargs["top_p"] = config.top_p
 
     if config.api_key:
         kwargs["api_key"] = config.api_key
 
     if config.api_base:
         kwargs["base_url"] = config.api_base
-
-    if config.top_p is not None:
-        kwargs["top_p"] = config.top_p
 
     if config.seed is not None:
         kwargs["seed"] = config.seed

@@ -61,6 +61,32 @@ class TestModelConfig:
         with pytest.raises(ValueError):
             ModelConfig(temperature=2.1)
 
+    def test_skip_sampling_params_default(self):
+        """Test that skip_sampling_params defaults to False."""
+        config = ModelConfig()
+        assert config.skip_sampling_params is False
+
+    def test_skip_sampling_params_explicit(self):
+        """Test that skip_sampling_params can be explicitly set."""
+        config = ModelConfig(
+            backend=ModelBackend.API,
+            model_name="gpt-5.1",
+            api_key="sk-test",
+            skip_sampling_params=True,
+        )
+        assert config.skip_sampling_params is True
+
+    def test_beta_model_config(self):
+        """Test configuration for beta models like gpt-5.1."""
+        config = ModelConfig(
+            backend=ModelBackend.API,
+            model_name="gpt-5.1",
+            api_key="sk-test",
+            api_base="https://api.jiekou.ai/openai",
+        )
+        assert config.model_name == "gpt-5.1"
+        assert config.api_base == "https://api.jiekou.ai/openai"
+
 
 class TestAgentModelConfig:
     def test_default_agent_config(self):

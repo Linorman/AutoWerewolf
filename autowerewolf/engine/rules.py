@@ -287,9 +287,9 @@ def resolve_night_actions(
                 target.is_alive = False
                 dead_player_ids.append(wolf_target_id)
                 # Handle sheriff death
-                if target.is_sheriff:
-                    target.is_sheriff = False
-                    new_state.sheriff_id = None
+                # if target.is_sheriff:
+                #     target.is_sheriff = False
+                #     new_state.sheriff_id = None
             elif is_protected or is_saved:
                 # Protected or saved - survives
                 pass
@@ -297,10 +297,6 @@ def resolve_night_actions(
                 # Not protected and not saved - dies
                 target.is_alive = False
                 dead_player_ids.append(wolf_target_id)
-                # Handle sheriff death
-                if target.is_sheriff:
-                    target.is_sheriff = False
-                    new_state.sheriff_id = None
                 
                 # Check if target is hunter
                 if target.role == Role.HUNTER:
@@ -323,10 +319,6 @@ def resolve_night_actions(
                 if not state.config.rule_variants.hunter_can_shoot_if_poisoned:
                     target.hunter_can_shoot = False
             
-            # Handle sheriff death from poison
-            if target.is_sheriff:
-                target.is_sheriff = False
-                new_state.sheriff_id = None
     
     # Update state
     new_state.wolf_kill_target_id = wolf_target_id
@@ -523,18 +515,12 @@ def resolve_lynch(
     
     # Normal lynch - player dies
     player.is_alive = False
-    
+
     events.append(LynchEvent(
         day_number=state.day_number,
         phase=Phase.DAY,
         target_id=lynched_player_id,
     ))
-    
-    # Handle sheriff death
-    if player.is_sheriff:
-        player.is_sheriff = False
-        new_state.sheriff_id = None
-        # Badge will be passed or torn in a separate action
     
     return new_state, events
 
@@ -654,18 +640,13 @@ def resolve_wolf_self_explode(
     
     # Wolf dies
     wolf.is_alive = False
-    
+
     events.append(WolfSelfExplodeEvent(
         day_number=state.day_number,
         phase=Phase.DAY,
         actor_id=actor_id,
         target_id=actor_id,
     ))
-    
-    # Handle sheriff death
-    if wolf.is_sheriff:
-        wolf.is_sheriff = False
-        new_state.sheriff_id = None
     
     return new_state, events
 

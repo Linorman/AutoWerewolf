@@ -84,6 +84,10 @@ class ModelConfig(BaseModel):
         default=None,
         description="Extra parameters to pass to the model"
     )
+    skip_sampling_params: bool = Field(
+        default=False,
+        description="Skip temperature/top_p/etc for beta models (e.g., gpt-5.1, o1, o3)"
+    )
 
     @model_validator(mode="after")
     def validate_api_config(self) -> "ModelConfig":
