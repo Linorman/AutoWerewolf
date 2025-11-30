@@ -55,22 +55,20 @@ def create_game_state(config: GameConfig, player_names: Optional[list[str]] = No
     Returns:
         Initialized GameState with players and roles assigned
     """
-    # Set random seed if provided
     if config.random_seed is not None:
         random.seed(config.random_seed)
     
-    # Generate default player names if not provided
+    # Default player names when not provided
     if player_names is None:
         player_names = [f"Player {i}" for i in range(1, config.num_players + 1)]
     
     if len(player_names) != config.num_players:
         raise ValueError(f"Expected {config.num_players} player names, got {len(player_names)}")
     
-    # Get role composition and shuffle
     roles = get_role_composition(config.role_set)
     random.shuffle(roles)
     
-    # Create players
+    # Create player objects
     players = []
     for i, (name, role) in enumerate(zip(player_names, roles), start=1):
         player = Player(
@@ -80,10 +78,9 @@ def create_game_state(config: GameConfig, player_names: Optional[list[str]] = No
         )
         players.append(player)
     
-    # Create initial game state
     state = GameState(
         config=config,
-        day_number=0,  # Night 1 is day_number=0
+        day_number=0,
         phase=Phase.NIGHT,
         players=players,
     )
@@ -137,7 +134,7 @@ def resolve_night_actions(
     Returns:
         Tuple of (new game state, list of events)
     """
-    # Create a copy of state to modify
+    # Operate on a copy of the state
     new_state = deepcopy(state)
     events: list[Event] = []
     
@@ -160,10 +157,9 @@ def resolve_night_actions(
         elif action.action_type == ActionType.SEER_CHECK:
             seer_action = action
     
-    # Track protected player
+    # Protected player id
     protected_player_id: Optional[str] = None
     
-    # 1. Guard protection
     if guard_action and guard_action.target_id:
         guard = new_state.get_player(guard_action.actor_id)
         if guard and guard.is_alive and guard.role == Role.GUARD:
@@ -180,7 +176,6 @@ def resolve_night_actions(
                     visible_to=[guard_action.actor_id],
                 ))
     
-    # 2. Werewolf kill target
     wolf_target_id: Optional[str] = None
     if wolf_kill_action and wolf_kill_action.target_id:
         wolf_target_id = wolf_kill_action.target_id
@@ -195,7 +190,6 @@ def resolve_night_actions(
             visible_to=werewolf_ids,
         ))
     
-    # 3. Witch actions
     witch_saved_target: Optional[str] = None
     witch_poisoned_target: Optional[str] = None
     
@@ -250,7 +244,6 @@ def resolve_night_actions(
                     visible_to=[witch.id],
                 ))
     
-    # 4. Seer check
     if seer_action and seer_action.target_id:
         seer = new_state.get_player(seer_action.actor_id)
         if seer and seer.is_alive and seer.role == Role.SEER:
@@ -268,7 +261,6 @@ def resolve_night_actions(
                     visible_to=[seer.id],
                 ))
     
-    # 5. Resolve deaths
     dead_player_ids: list[str] = []
     
     # Wolf kill resolution
@@ -287,9 +279,7 @@ def resolve_night_actions(
                 target.is_alive = False
                 dead_player_ids.append(wolf_target_id)
                 # Handle sheriff death
-                # if target.is_sheriff:
-                #     target.is_sheriff = False
-                #     new_state.sheriff_id = None
+                
             elif is_protected or is_saved:
                 # Protected or saved - survives
                 pass
@@ -307,7 +297,6 @@ def resolve_night_actions(
                     elif not state.config.rule_variants.hunter_can_shoot_if_night_killed:
                         target.hunter_can_shoot = False
     
-    # Witch poison resolution
     if witch_poisoned_target:
         target = new_state.get_player(witch_poisoned_target)
         if target and target.is_alive:
@@ -320,7 +309,6 @@ def resolve_night_actions(
                     target.hunter_can_shoot = False
             
     
-    # Update state
     new_state.wolf_kill_target_id = wolf_target_id
     
     return new_state, events
@@ -409,7 +397,7 @@ def resolve_vote(
     new_state = deepcopy(state)
     events: list[Event] = []
     
-    # Count votes with sheriff weight
+    # Count votes (apply sheriff weight)
     vote_counts: dict[str, float] = {}
     
     for voter_id, target_id in votes.items():
@@ -500,7 +488,7 @@ def resolve_lynch(
     if not player or not player.is_alive:
         return new_state, events
     
-    # Check for Village Idiot
+    # Village Idiot special-case
     if player.role == Role.VILLAGE_IDIOT and not player.village_idiot_revealed:
         # Village Idiot reveals and survives (loses vote)
         player.village_idiot_revealed = True
@@ -513,7 +501,7 @@ def resolve_lynch(
         
         return new_state, events
     
-    # Normal lynch - player dies
+    # Apply normal lynch (player dies)
     player.is_alive = False
 
     events.append(LynchEvent(
@@ -588,7 +576,7 @@ def resolve_hunter_shot(
     if not hunter or hunter.role != Role.HUNTER:
         return new_state, events
     
-    # Check if hunter can shoot
+    # Hunter: check permission to shoot
     if not hunter.hunter_can_shoot:
         return new_state, events
     
@@ -670,7 +658,7 @@ def check_win_condition(state: GameState) -> WinningTeam:
     alive_villagers = state.get_alive_villagers()
     alive_specials = state.get_alive_special_roles()
     
-    # Village wins if all werewolves are dead
+    # Village wins if no werewolves remain
     if len(alive_werewolves) == 0:
         return WinningTeam.VILLAGE
     
