@@ -13,7 +13,7 @@ from autowerewolf.config.performance import LanguageSetting, PerformanceConfig, 
 from autowerewolf.engine.roles import Role, RoleSet, WinningTeam
 from autowerewolf.engine.state import Event, GameConfig, GameState
 from autowerewolf.io.persistence import save_game_log
-from autowerewolf.orchestrator.game_orchestrator import GameOrchestrator, GameResult
+from autowerewolf.orchestrator.game_orchestrator import GameOrchestrator, GameResult, GameStoppedException
 from autowerewolf.web.schemas import (
     ActionSubmitRequest,
     CreateGameRequest,
@@ -369,6 +369,18 @@ class GameSession:
                     "type": "game_over",
                     "winning_team": self.result.winning_team.value if self.result.winning_team else "unknown",
                 })
+        
+        except GameStoppedException:
+            # Game was stopped gracefully via exception
+            with self._lock:
+                if self.orchestrator and self.orchestrator._game_state:
+                    self.game_state = self.orchestrator._game_state
+            self.status = "stopped"
+            logger.info(f"Game {self.game_id} was stopped via GameStoppedException")
+            self._realtime_event_queue.put({
+                "type": "game_stopped",
+                "message": "Game was stopped by user",
+            })
             
         except Exception as e:
             # Check if this was due to a stop request

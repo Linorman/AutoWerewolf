@@ -13,7 +13,7 @@ from autowerewolf.config.performance import LanguageSetting, PerformanceConfig, 
 from autowerewolf.engine.roles import Role, RoleSet, WinningTeam
 from autowerewolf.engine.state import Event, GameConfig, GameState
 from autowerewolf.io.persistence import save_game_log
-from autowerewolf.orchestrator.game_orchestrator import GameOrchestrator, GameResult
+from autowerewolf.orchestrator.game_orchestrator import GameOrchestrator, GameResult, GameStoppedException
 
 logging.basicConfig(
     level=logging.INFO,
@@ -544,6 +544,14 @@ class StreamlitGameSession:
                     log_path = default_logs_dir / f"logs-{self.orchestrator._game_id}.json"
                     save_game_log(self.result.game_log, log_path)
                     logger.info(f"[Session:{self.game_id}] Game log saved to: {log_path}")
+
+        except GameStoppedException:
+            # Game was stopped gracefully via exception
+            with self._lock:
+                if self.orchestrator and self.orchestrator._game_state:
+                    self.game_state = self.orchestrator._game_state
+            self.status = "stopped"
+            logger.info(f"[Session:{self.game_id}] Game stopped via GameStoppedException")
                 
         except Exception as e:
             if self._stop_event.is_set():

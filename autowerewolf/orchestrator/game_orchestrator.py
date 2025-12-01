@@ -85,6 +85,11 @@ logger = logging.getLogger(__name__)
 MAX_GAME_DAYS = 20
 
 
+class GameStoppedException(Exception):
+    """Exception raised when game is stopped by user request."""
+    pass
+
+
 @dataclass
 class GameResult:
     winning_team: WinningTeam
@@ -192,6 +197,12 @@ class GameOrchestrator:
 
     def is_stop_requested(self) -> bool:
         return self._stop_requested
+
+    def _check_stop_requested(self) -> None:
+        """Check if stop was requested and raise exception if so."""
+        if self._stop_requested:
+            logger.info("Game stop detected, raising GameStoppedException")
+            raise GameStoppedException("Game was stopped by user request")
 
     def _truncate_content(self, content: str) -> str:
         """Truncate content to max speech length if needed."""
@@ -565,6 +576,7 @@ class GameOrchestrator:
         
         if werewolf_agents:
             try:
+                self._check_stop_requested()
                 lead_wolf = wolves[0] if not human_wolf_id else wolves[0] if wolves[0].id != human_wolf_id else (wolves[1] if len(wolves) > 1 else wolves[0])
                 chat_model = werewolf_agents[0].chat_model
                 discussion_chain = WerewolfDiscussionChain(
@@ -606,6 +618,8 @@ class GameOrchestrator:
                             f"Proposed {proposal.target_player_id}: {proposal.reasoning}",
                         )
 
+            except GameStoppedException:
+                raise
             except Exception as e:
                 logger.warning(f"Werewolf discussion failed: {e}")
         
@@ -656,6 +670,8 @@ class GameOrchestrator:
                     })
                     if result.kill_target_id in valid_targets:
                         target_votes[result.kill_target_id] = target_votes.get(result.kill_target_id, 0) + 1
+            except GameStoppedException:
+                raise
             except Exception as e:
                 logger.warning(f"Human werewolf action failed: {e}")
 
@@ -708,6 +724,8 @@ class GameOrchestrator:
                         actor_id=seer.id,
                         target_id=result.check_target_id,
                     )
+        except GameStoppedException:
+            raise
         except Exception as e:
             logger.warning(f"Seer action failed: {e}")
 
@@ -763,6 +781,8 @@ class GameOrchestrator:
                         )
 
             return cure_action, poison_action
+        except GameStoppedException:
+            raise
         except Exception as e:
             logger.warning(f"Witch action failed: {e}")
             return None, None
@@ -805,6 +825,8 @@ class GameOrchestrator:
                         actor_id=guard.id,
                         target_id=result.protect_target_id,
                     )
+        except GameStoppedException:
+            raise
         except Exception as e:
             logger.warning(f"Guard action failed: {e}")
 
@@ -814,6 +836,8 @@ class GameOrchestrator:
         return None
 
     def _run_night_phase(self, state: OrchestratorState) -> OrchestratorState:
+        self._check_stop_requested()
+        
         alive_count = len(state.game_state.get_alive_players())
         if self._game_logger:
             self._game_logger.log_phase_change(
@@ -841,8 +865,10 @@ class GameOrchestrator:
                         target.name if target else None,
                     )
 
+        self._check_stop_requested()
         add_action(self._collect_guard_action(state))
 
+        self._check_stop_requested()
         wolf_action, wolf_discussions = self._collect_werewolf_action(state)
         if wolf_action:
             actions.append(wolf_action)
@@ -866,9 +892,12 @@ class GameOrchestrator:
         if wolf_discussions:
             self._record_werewolf_discussion(state.game_state.day_number, wolf_discussions)
 
+        self._check_stop_requested()
         cure_action, poison_action = self._collect_witch_action(state)
         add_action(cure_action)
         add_action(poison_action)
+        
+        self._check_stop_requested()
         add_action(self._collect_seer_action(state))
 
         alive_before = set(p.id for p in state.game_state.get_alive_players())
@@ -891,6 +920,8 @@ class GameOrchestrator:
 
         candidates = []
         for player in state.game_state.get_alive_players():
+            self._check_stop_requested()
+            
             agent = state.agents.get(player.id)
             if not agent:
                 continue
@@ -900,6 +931,8 @@ class GameOrchestrator:
                 result = agent.decide_sheriff_run(game_view)
                 if result.run_for_sheriff:
                     candidates.append(player.id)
+            except GameStoppedException:
+                raise
             except Exception as e:
                 logger.warning(f"Sheriff decision failed for {player.id}: {e}")
 
@@ -909,6 +942,8 @@ class GameOrchestrator:
 
         votes: dict[str, str] = {}
         for player in state.game_state.get_alive_players():
+            self._check_stop_requested()
+            
             agent = state.agents.get(player.id)
             if not agent:
                 continue
@@ -926,6 +961,8 @@ class GameOrchestrator:
                 result = agent.decide_vote(game_view)
                 if result.target_player_id in votable_candidates:
                     votes[player.id] = result.target_player_id
+            except GameStoppedException:
+                raise
             except Exception as e:
                 logger.warning(f"Sheriff vote failed for {player.id}: {e}")
 
@@ -959,6 +996,8 @@ class GameOrchestrator:
         }
 
     def _run_day_speeches(self, state: OrchestratorState) -> OrchestratorState:
+        self._check_stop_requested()
+        
         alive_players = state.game_state.get_alive_players()
 
         sheriff = state.game_state.get_sheriff()
@@ -970,6 +1009,7 @@ class GameOrchestrator:
         spoken_speeches: list[dict[str, Any]] = []
 
         if self.performance_config.enable_batching and self._batch_executor:
+            self._check_stop_requested()
             requests = []
             for idx, player in enumerate(ordered):
                 agent = state.agents.get(player.id)
@@ -984,6 +1024,7 @@ class GameOrchestrator:
 
             results = self._batch_executor.execute_speeches_batch(requests)
             for batch_result in results:
+                self._check_stop_requested()
                 if batch_result.result and isinstance(batch_result.result, SpeechOutput):
                     content = self._truncate_content(batch_result.result.content)
                     player = state.game_state.get_player(batch_result.player_id)
@@ -1014,6 +1055,8 @@ class GameOrchestrator:
                         )
         else:
             for idx, player in enumerate(ordered):
+                self._check_stop_requested()
+                
                 agent = state.agents.get(player.id)
                 if not agent:
                     continue
@@ -1053,6 +1096,8 @@ class GameOrchestrator:
                                 state.game_state.day_number,
                                 content,
                             )
+                except GameStoppedException:
+                    raise
                 except Exception as e:
                     logger.warning(f"Speech failed for {player.id}: {e}")
 
@@ -1084,6 +1129,8 @@ class GameOrchestrator:
         }
 
     def _run_day_vote(self, state: OrchestratorState) -> OrchestratorState:
+        self._check_stop_requested()
+        
         if not self.performance_config.skip_narration:
             narration = state.moderator.announce_voting_start()
             self._add_narration(state, narration)
@@ -1091,6 +1138,7 @@ class GameOrchestrator:
         votes: dict[str, str] = {}
 
         if self.performance_config.enable_batching and self._batch_executor:
+            self._check_stop_requested()
             requests = []
             player_targets: dict[str, list[str]] = {}
             for player in state.game_state.get_alive_players():
@@ -1112,6 +1160,7 @@ class GameOrchestrator:
 
             results = self._batch_executor.execute_votes_batch(requests)
             for batch_result in results:
+                self._check_stop_requested()
                 valid_targets = player_targets.get(batch_result.player_id, [])
                 if batch_result.result and isinstance(batch_result.result, VoteOutput):
                     if batch_result.result.target_player_id in valid_targets:
@@ -1122,6 +1171,8 @@ class GameOrchestrator:
                     votes[batch_result.player_id] = random.choice(valid_targets)
         else:
             for player in state.game_state.get_alive_players():
+                self._check_stop_requested()
+                
                 agent = state.agents.get(player.id)
                 if not agent:
                     continue
@@ -1146,6 +1197,8 @@ class GameOrchestrator:
                             votes[player.id] = result.target_player_id
                         elif valid_targets:
                             votes[player.id] = random.choice(valid_targets)
+                except GameStoppedException:
+                    raise
                 except Exception as e:
                     logger.warning(f"Vote failed for {player.id}: {e}")
                     if valid_targets:
@@ -1369,6 +1422,8 @@ class GameOrchestrator:
         return state
 
     def _run_day_phase(self, state: OrchestratorState) -> OrchestratorState:
+        self._check_stop_requested()
+        
         state.game_state = advance_to_day(state.game_state)
 
         if state.game_state.day_number >= MAX_GAME_DAYS:
@@ -1383,6 +1438,7 @@ class GameOrchestrator:
             )
 
         if state.game_state.day_number == 1:
+            self._check_stop_requested()
             state = self._run_sheriff_election(state)
 
         deaths = state.night_deaths
@@ -1391,6 +1447,8 @@ class GameOrchestrator:
 
         death_events = []
         for death_id in deaths:
+            self._check_stop_requested()
+            
             event = DeathAnnouncementEvent(
                 day_number=state.game_state.day_number,
                 phase=Phase.DAY,
@@ -1424,6 +1482,8 @@ class GameOrchestrator:
         state.game_state = update_win_condition(state.game_state)
         if state.game_state.is_game_over():
             return state
+        
+        self._check_stop_requested()
 
         state = self._run_day_speeches(state)
         state = self._run_day_vote(state)
@@ -1618,25 +1678,41 @@ class GameOrchestrator:
         compiled_graph = graph.compile()
 
         final_state_dict = None
+        final_state = initial_state
         run_config = {"recursion_limit": MAX_GAME_DAYS * 5}
-        for state_dict in compiled_graph.stream(initial_state.to_dict(), config=run_config):  # type: ignore[arg-type]
-            final_state_dict = state_dict
+        
+        try:
+            for state_dict in compiled_graph.stream(initial_state.to_dict(), config=run_config):  # type: ignore[arg-type]
+                final_state_dict = state_dict
+                # Check for stop request after each step
+                if self._stop_requested:
+                    logger.info("Game stop detected during graph execution")
+                    break
 
-        if final_state_dict:
-            last_key = list(final_state_dict.keys())[-1]
-            final_data = final_state_dict[last_key]
-            final_state = OrchestratorState.from_dict(final_data)
-            
-            for event in final_data.get("events_buffer", []):
-                self._log_event(event, final_state.game_state)
-        else:
-            final_state = initial_state
+            if final_state_dict:
+                last_key = list(final_state_dict.keys())[-1]
+                final_data = final_state_dict[last_key]
+                final_state = OrchestratorState.from_dict(final_data)
+                
+                for event in final_data.get("events_buffer", []):
+                    self._log_event(event, final_state.game_state)
+                    
+        except GameStoppedException:
+            logger.info("Game stopped via GameStoppedException")
+            # Use the current game state
+            if self._game_state:
+                final_state = OrchestratorState(
+                    game_state=self._game_state,
+                    agents=self._agents,
+                    moderator=self._moderator,
+                )
 
-        if not self.performance_config.skip_narration:
+        if not self._stop_requested and not self.performance_config.skip_narration:
             narration = self._moderator.announce_game_end(final_state.game_state)
             self._add_narration(final_state, narration)
         
-        self._finalize_game_log(final_state.game_state, final_state.narration_log)
+        if not self._stop_requested:
+            self._finalize_game_log(final_state.game_state, final_state.narration_log)
 
         if self._batch_executor:
             self._batch_executor.shutdown()
