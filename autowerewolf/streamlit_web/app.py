@@ -62,6 +62,8 @@ def init_session_state():
         st.session_state.show_winner_modal = False
     if "winner_team" not in st.session_state:
         st.session_state.winner_team = None
+    if "winner_shown_for_game" not in st.session_state:
+        st.session_state.winner_shown_for_game = None
     if "config_loaded" not in st.session_state:
         logger.info("[App] Initializing session state and loading configurations...")
         streamlit_config_loader.load_from_file()
@@ -357,6 +359,9 @@ def render_sidebar():
                 session.start()
                 st.session_state.game_session = session
                 st.session_state.last_event_count = 0
+                st.session_state.winner_shown_for_game = None
+                st.session_state.show_winner_modal = False
+                st.session_state.winner_team = None
                 logger.info(f"[App] Game session started: {session.game_id}")
                 st.rerun()
                 return
@@ -424,11 +429,6 @@ def render_game_arena(session: StreamlitGameSession):
             st.success(t("village_wins"))
         else:
             st.error(t("werewolf_wins"))
-        
-        if not st.session_state.get("show_winner_modal"):
-            st.session_state.show_winner_modal = True
-            st.session_state.winner_team = winning
-            logger.info(f"[App] Game completed. Winner: {winning}")
     elif status == "error":
         st.error(f"❌ {t('game_error')}: {session.error_message}")
         logger.error(f"[App] Game error displayed: {session.error_message}")
@@ -721,11 +721,14 @@ def render_winner_modal(winning_team: str):
 def render_main_content():
     session = get_session()
     
-    if st.session_state.get("show_winner_modal") and st.session_state.get("winner_team"):
-        render_winner_modal(st.session_state.winner_team)
-        return
-    
     if session is None:
+        st.session_state.winner_shown_for_game = None
+        
+        winner_team = st.session_state.get("winner_team")
+        if st.session_state.get("show_winner_modal") and winner_team:
+            render_winner_modal(winner_team)
+            return
+        
         st.title("🐺 " + t("app_title"))
         
         st.markdown(f"""
@@ -739,6 +742,21 @@ def render_main_content():
         
         **{t('play_mode')}**: {t('play_desc')}
         """)
+        return
+    
+    if session.status == "completed":
+        game_id = session.game_id
+        if st.session_state.winner_shown_for_game != game_id:
+            state = session.get_state()
+            winning_team = state.get("winning_team")
+            st.session_state.show_winner_modal = True
+            st.session_state.winner_team = winning_team
+            st.session_state.winner_shown_for_game = game_id
+            logger.info(f"[App] Game completed. Winner: {winning_team}")
+    
+    winner_team = st.session_state.get("winner_team")
+    if st.session_state.get("show_winner_modal") and winner_team:
+        render_winner_modal(winner_team)
         return
     
     if session.mode == "play":
