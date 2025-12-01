@@ -783,6 +783,82 @@ def serve(
     )
 
 
+@app.command(name="streamlit-web")
+def streamlit_web(
+    port: int = typer.Option(
+        8501,
+        "--port",
+        "-p",
+        help="Port for Streamlit server",
+    ),
+    model_config: Optional[Path] = typer.Option(
+        None,
+        "--model-config",
+        "-m",
+        help="Path to model configuration YAML file (default: autowerewolf_models.yaml)",
+    ),
+    game_config: Optional[Path] = typer.Option(
+        None,
+        "--game-config",
+        "-g",
+        help="Path to game configuration YAML file (default: autowerewolf_config.yaml)",
+    ),
+) -> None:
+    """Start the Streamlit-based web UI."""
+    import subprocess
+    import sys
+    
+    try:
+        import streamlit
+    except ImportError:
+        typer.echo("Error: Streamlit not installed. Run: pip install streamlit", err=True)
+        raise typer.Exit(code=1)
+    
+    typer.echo(f"\n🐺 AutoWerewolf Streamlit Web UI Starting...")
+    typer.echo(f"=" * 50)
+    typer.echo(f"  🎮 Web UI:  http://localhost:{port}")
+    typer.echo(f"=" * 50)
+    
+    if model_config:
+        typer.echo(f"  📁 Model Config: {model_config}")
+    else:
+        typer.echo(f"  📁 Model Config: (auto-detect or defaults)")
+    
+    if game_config:
+        typer.echo(f"  🎲 Game Config:  {game_config}")
+    else:
+        typer.echo(f"  🎲 Game Config:  (auto-detect or defaults)")
+    
+    typer.echo(f"=" * 50)
+    typer.echo("Press Ctrl+C to stop\n")
+    
+    # Build streamlit command
+    app_path = Path(__file__).parent.parent / "streamlit_web" / "app.py"
+    
+    cmd = [
+        sys.executable, "-m", "streamlit", "run",
+        str(app_path),
+        "--server.port", str(port),
+        "--server.headless", "true",
+    ]
+    
+    # Pass config paths via environment variables or query params
+    env = {}
+    if model_config:
+        env["AUTOWEREWOLF_MODEL_CONFIG"] = str(model_config)
+    if game_config:
+        env["AUTOWEREWOLF_GAME_CONFIG"] = str(game_config)
+    
+    import os
+    full_env = os.environ.copy()
+    full_env.update(env)
+    
+    try:
+        subprocess.run(cmd, env=full_env)
+    except KeyboardInterrupt:
+        typer.echo("\n\nServer stopped.")
+
+
 @app.command(name="init-config")
 def init_config(
     output: Path = typer.Option(
